@@ -240,6 +240,7 @@ html {
     cursor: pointer;
     transition: var(--transition-smooth);
     letter-spacing: 0.5px;
+    margin-bottom: 12px;
 }
 
 .send-btn:hover {
@@ -254,6 +255,27 @@ html {
     cursor: not-allowed;
     transform: none;
     border-color: var(--border-dark);
+}
+
+.admin-panel-btn {
+    width: 100%;
+    padding: 16px;
+    background: var(--bg-primary);
+    border: 1px solid var(--accent-light);
+    border-radius: var(--border-radius-lg);
+    color: var(--accent-light);
+    font-weight: 600;
+    font-size: 16px;
+    cursor: pointer;
+    transition: var(--transition-smooth);
+    letter-spacing: 0.5px;
+}
+
+.admin-panel-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-medium);
+    background: rgba(237, 233, 213, 0.1);
+    border-color: var(--accent-light);
 }
 
 /* Admin Panel */

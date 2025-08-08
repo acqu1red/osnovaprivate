@@ -33,9 +33,9 @@ class OSNOVAMiniApp {
         this.bindEvents();
         this.loadUserMessages();
         
-        // Если админ, показываем админ-панель
+        // Показываем кнопку админ-панели только для администраторов
         if (this.isAdmin) {
-            this.showAdminPanel();
+            this.showAdminPanelButton();
         }
     }
     
@@ -46,6 +46,13 @@ class OSNOVAMiniApp {
             type: 'admin',
             timestamp: new Date()
         });
+    }
+    
+    showAdminPanelButton() {
+        const adminPanelBtn = document.getElementById('admin-panel-btn');
+        if (adminPanelBtn) {
+            adminPanelBtn.style.display = 'block';
+        }
     }
     
     bindEvents() {
@@ -66,6 +73,14 @@ class OSNOVAMiniApp {
         document.getElementById('attach-btn').addEventListener('click', () => {
             this.attachFile();
         });
+        
+        // Кнопка админ-панели
+        const adminPanelBtn = document.getElementById('admin-panel-btn');
+        if (adminPanelBtn) {
+            adminPanelBtn.addEventListener('click', () => {
+                this.showAdminPanel();
+            });
+        }
         
         // Админ-панель
         if (this.isAdmin) {
