@@ -5,7 +5,9 @@ class OSNOVAMiniApp {
         this.currentUser = null;
         this.isAdmin = false;
         this.selectedUserId = null;
+        this.selectedUserData = null;
         this.questions = this.loadQuestions();
+        this.currentView = 'chat'; // 'chat', 'admin-panel', 'user-chat'
         
         this.init();
     }
@@ -221,73 +223,70 @@ ${data.question}
     }
     
     showAdminPanel() {
+        this.currentView = 'admin-panel';
         document.getElementById('chat-container').style.display = 'none';
         document.getElementById('admin-panel').style.display = 'flex';
         this.loadUsersList();
     }
     
     showChat() {
+        this.currentView = 'chat';
         document.getElementById('admin-panel').style.display = 'none';
         document.getElementById('chat-container').style.display = 'flex';
-    }
-    
-    loadUsersList() {
-        const usersList = document.getElementById('users-list');
-        usersList.innerHTML = '';
         
-        Object.keys(this.questions).forEach(userId => {
-            const userData = this.questions[userId];
-            const userElement = document.createElement('div');
-            userElement.className = 'user-item';
-            userElement.innerHTML = `
-                <div class="user-name">${userData.user.first_name || userData.user.username}</div>
-                <div class="user-id">@${userData.user.username} (${userId})</div>
-            `;
-            
-            userElement.addEventListener('click', () => {
-                this.selectUser(userId);
-            });
-            
-            usersList.appendChild(userElement);
-        });
+        // Очищаем сообщения и загружаем свои
+        const messagesContainer = document.getElementById('messages');
+        messagesContainer.innerHTML = '';
+        this.loadUserMessages();
+        
+        // Обновляем заголовок
+        document.querySelector('.header h1').textContent = 'ОСНОВА: доступ к системе';
+        document.querySelector('.subtitle').textContent = 'Доступ к закрытому каналу с техникой OSNOVA';
     }
     
-    selectUser(userId) {
+    showUserChat(userId) {
+        this.currentView = 'user-chat';
         this.selectedUserId = userId;
+        this.selectedUserData = this.questions[userId];
         
-        // Обновляем активный класс
-        document.querySelectorAll('.user-item').forEach(item => {
-            item.classList.remove('active');
+        // Скрываем админ-панель и показываем чат
+        document.getElementById('admin-panel').style.display = 'none';
+        document.getElementById('chat-container').style.display = 'flex';
+        
+        // Обновляем заголовок с именем пользователя
+        const userName = this.selectedUserData.user.first_name || this.selectedUserData.user.username || 'Пользователь';
+        document.querySelector('.header h1').textContent = `💬 Чат с ${userName}`;
+        document.querySelector('.subtitle').textContent = `ID: ${userId} | @${this.selectedUserData.user.username || 'скрыт'}`;
+        
+        // Очищаем сообщения и загружаем сообщения выбранного пользователя
+        const messagesContainer = document.getElementById('messages');
+        messagesContainer.innerHTML = '';
+        
+        this.selectedUserData.messages.forEach(message => {
+            this.addMessage(message);
         });
-        event.target.closest('.user-item').classList.add('active');
         
-        // Загружаем сообщения пользователя
-        this.loadUserMessagesForAdmin(userId);
+        // Обновляем обработчики событий для админского режима
+        this.updateChatHandlers();
     }
     
-    loadUserMessagesForAdmin(userId) {
-        const adminMessages = document.getElementById('admin-messages');
-        adminMessages.innerHTML = '';
+    updateChatHandlers() {
+        // Удаляем старые обработчики
+        const sendBtn = document.getElementById('send-btn');
+        const messageInput = document.getElementById('message-input');
         
-        const userData = this.questions[userId];
-        if (userData) {
-            userData.messages.forEach(message => {
-                const messageElement = document.createElement('div');
-                messageElement.className = `message ${message.type}`;
-                messageElement.innerHTML = `
-                    <div class="message-text">${this.escapeHtml(message.text)}</div>
-                    <div class="message-time">${this.formatTime(message.timestamp)}</div>
-                `;
-                
-                adminMessages.appendChild(messageElement);
-            });
-            
-            adminMessages.scrollTop = adminMessages.scrollHeight;
-        }
+        // Создаем новые обработчики для админского режима
+        sendBtn.onclick = () => this.sendAdminMessage();
+        messageInput.onkeypress = (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                this.sendAdminMessage();
+            }
+        };
     }
     
-    sendAdminReply() {
-        const input = document.getElementById('admin-reply');
+    sendAdminMessage() {
+        const input = document.getElementById('message-input');
         const text = input.value.trim();
         
         if (!text || !this.selectedUserId) return;
@@ -302,17 +301,8 @@ ${data.question}
             adminId: this.currentUser.id
         };
         
-        // Добавляем в админ-чат
-        const adminMessages = document.getElementById('admin-messages');
-        const messageElement = document.createElement('div');
-        messageElement.className = 'message admin';
-        messageElement.innerHTML = `
-            <div class="message-text">${this.escapeHtml(text)}</div>
-            <div class="message-time">${this.formatTime(reply.timestamp)}</div>
-        `;
-        
-        adminMessages.appendChild(messageElement);
-        adminMessages.scrollTop = adminMessages.scrollHeight;
+        // Добавляем в чат
+        this.addMessage(reply);
         
         // Сохраняем ответ
         this.questions[this.selectedUserId].messages.push(reply);
@@ -326,6 +316,39 @@ ${data.question}
         
         // Показываем статус
         this.showStatus('Ответ отправлен!', 'success');
+    }
+    
+    loadUsersList() {
+        const usersList = document.getElementById('users-list');
+        usersList.innerHTML = '';
+        
+        Object.keys(this.questions).forEach(userId => {
+            const userData = this.questions[userId];
+            const userElement = document.createElement('div');
+            userElement.className = 'user-item';
+            userElement.innerHTML = `
+                <div class="user-name">${userData.user.first_name || userData.user.username}</div>
+                <div class="user-id">@${userData.user.username} (${userId})</div>
+                <div class="user-message-count">${userData.messages.length} сообщений</div>
+            `;
+            
+            userElement.addEventListener('click', () => {
+                this.selectUser(userId);
+            });
+            
+            usersList.appendChild(userElement);
+        });
+    }
+    
+    selectUser(userId) {
+        // Обновляем активный класс
+        document.querySelectorAll('.user-item').forEach(item => {
+            item.classList.remove('active');
+        });
+        event.target.closest('.user-item').classList.add('active');
+        
+        // Показываем чат с пользователем
+        this.showUserChat(userId);
     }
     
     sendUserNotification(reply) {
