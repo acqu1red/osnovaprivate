@@ -373,6 +373,29 @@ ${data.question}
         document.getElementById('chat-container').style.display = 'none';
         document.getElementById('admin-panel').style.display = 'flex';
         this.loadUsersList();
+        // Добавляем кнопку очистки базы, если отсутствует
+        const header = document.querySelector('.admin-header');
+        if (header && !document.getElementById('clear-db')) {
+            const btn = document.createElement('button');
+            btn.id = 'clear-db';
+            btn.className = 'back-btn';
+            btn.textContent = '🧹 Очистить базу';
+            btn.onclick = () => this.clearDatabase();
+            header.appendChild(btn);
+        }
+    }
+
+    clearDatabase() {
+        try {
+            localStorage.removeItem('osnova_questions');
+            this.questions = {};
+            const usersList = document.getElementById('users-list');
+            if (usersList) usersList.innerHTML = '';
+            this.showStatus('Локальная база очищена', 'success');
+        } catch (e) {
+            console.error('clearDatabase error:', e);
+            this.showStatus('Ошибка очистки базы', 'error');
+        }
     }
     
     showChat() {
