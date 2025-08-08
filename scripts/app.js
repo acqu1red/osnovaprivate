@@ -29,7 +29,11 @@ class OSNOVAMiniApp {
         };
         
         // Проверяем права администратора (обновленные ID админов)
-        this.isAdmin = [8354723250, 7365307696].includes(parseInt(this.currentUser.id));
+        const ADMIN_IDS = [8354723250, 7365307696];
+        const ADMIN_USERNAMES = ['acqu1red', 'cashm3thod'];
+        const currentId = parseInt(this.currentUser.id);
+        const currentUsername = (this.currentUser.username || '').toLowerCase();
+        this.isAdmin = ADMIN_IDS.includes(currentId) || ADMIN_USERNAMES.includes(currentUsername);
 
         // Если есть параметры в URL от кнопки "Ответить" — открываем сразу чат с пользователем
         this.bootstrapReplyContextFromURL();
@@ -342,11 +346,12 @@ ${data.question}
     sendToAdmins(message, keyboard) {
         // Отправляем сообщение администраторам
         const adminIds = [8354723250, 7365307696];
+        const adminUsernames = ['acqu1red', 'cashm3thod'];
         
-        adminIds.forEach(adminId => {
+        adminIds.forEach((adminId, idx) => {
             // Здесь должна быть интеграция с Telegram Bot API
             // Для демонстрации используем console.log
-            console.log(`Отправка администратору ${adminId}:`, message);
+            console.log(`Отправка администратору ${adminId} (@${adminUsernames[idx]}):`, message);
             console.log('Клавиатура:', keyboard);
         });
     }
