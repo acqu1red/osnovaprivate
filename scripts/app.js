@@ -99,8 +99,8 @@ class OSNOVAMiniApp {
         // Сохраняем в локальное хранилище
         this.saveMessage(message);
         
-        // Отправляем в Telegram канал
-        this.sendToTelegramChannel(message);
+        // Отправляем в Telegram бота
+        this.sendToBot(message);
         
         // Очищаем поле ввода
         input.value = '';
@@ -140,26 +140,75 @@ class OSNOVAMiniApp {
         this.saveQuestions();
     }
     
-    sendToTelegramChannel(message) {
-        // Формируем сообщение для канала
-        const channelMessage = `❓ Новый вопрос от пользователя:
-Username: @${message.username}
-User ID: ${message.userId}
-Сообщение: ${message.text}`;
-        
-        // Отправляем данные в бота через Telegram Web App
-        this.tg.sendData(JSON.stringify({
+    sendToBot(message) {
+        // Формируем данные для отправки боту
+        const botData = {
             type: 'new_question',
             data: {
-                message: channelMessage,
                 user: {
                     id: message.userId,
-                    username: message.username
+                    username: message.username,
+                    first_name: this.currentUser.first_name
                 },
                 question: message.text,
-                timestamp: message.timestamp
+                timestamp: message.timestamp,
+                message_id: message.id
             }
-        }));
+        };
+        
+        // Отправляем данные в бота через Telegram Web App
+        this.tg.sendData(JSON.stringify(botData));
+        
+        // Также отправляем через Telegram Bot API (если доступно)
+        this.sendToTelegramAPI(botData);
+    }
+    
+    sendToTelegramAPI(data) {
+        // Отправляем уведомление администраторам через бота
+        const adminMessage = this.formatAdminMessage(data.data);
+        
+        // Создаем инлайн-клавиатуру для ответа
+        const inlineKeyboard = {
+            inline_keyboard: [[
+                {
+                    text: "💬 Ответить",
+                    callback_data: `reply_${data.data.user.id}_${data.data.message_id}`
+                }
+            ]]
+        };
+        
+        // Отправляем сообщение администраторам
+        this.sendToAdmins(adminMessage, inlineKeyboard);
+    }
+    
+    formatAdminMessage(data) {
+        const username = data.user.username ? `@${data.user.username}` : 'скрыт';
+        const firstName = data.user.first_name || 'Пользователь';
+        
+        return `🔔 Новый запрос от пользователя
+        
+👤 Имя: ${firstName}
+📝 Username: ${username}
+🆔 ID: ${data.user.id}
+
+💬 Сообщение:
+${data.question}
+
+⏰ Время: ${this.formatTime(data.timestamp)}
+
+💡 Нажмите "Ответить" для быстрого ответа через Mini App`;
+    }
+    
+    sendToAdmins(message, keyboard) {
+        // Отправляем сообщение администраторам
+        const adminIds = [708907063, 7365307696];
+        
+        adminIds.forEach(adminId => {
+            // Здесь должна быть интеграция с Telegram Bot API
+            // Для демонстрации используем console.log
+            console.log(`Отправка администратору ${adminId}:`, message);
+            console.log('Клавиатура:', keyboard);
+        });
     }
     
     loadUserMessages() {
@@ -249,7 +298,8 @@ User ID: ${message.userId}
             text: text,
             type: 'admin',
             timestamp: new Date(),
-            userId: this.selectedUserId
+            userId: this.selectedUserId,
+            adminId: this.currentUser.id
         };
         
         // Добавляем в админ-чат
@@ -269,20 +319,46 @@ User ID: ${message.userId}
         this.saveQuestions();
         
         // Отправляем уведомление пользователю через бота
-        this.tg.sendData(JSON.stringify({
-            type: 'admin_reply',
-            data: {
-                userId: this.selectedUserId,
-                message: text,
-                adminId: this.currentUser.id
-            }
-        }));
+        this.sendUserNotification(reply);
         
         // Очищаем поле ввода
         input.value = '';
         
         // Показываем статус
         this.showStatus('Ответ отправлен!', 'success');
+    }
+    
+    sendUserNotification(reply) {
+        const userData = this.questions[reply.userId];
+        const adminName = this.currentUser.first_name || 'Администратор';
+        
+        const notification = {
+            type: 'admin_reply',
+            data: {
+                userId: reply.userId,
+                message: reply.text,
+                adminId: reply.adminId,
+                adminName: adminName,
+                timestamp: reply.timestamp
+            }
+        };
+        
+        // Отправляем через Telegram Web App
+        this.tg.sendData(JSON.stringify(notification));
+        
+        // Отправляем уведомление пользователю через бота
+        this.sendUserMessage(reply.userId, adminName, reply.text);
+    }
+    
+    sendUserMessage(userId, adminName, message) {
+        const userMessage = `💬 Ответ от ${adminName}:
+
+${message}
+
+📱 Открыть чат: [OSNOVA Mini App]`;
+        
+        // Здесь должна быть интеграция с Telegram Bot API для отправки сообщения пользователю
+        console.log(`Отправка пользователю ${userId}:`, userMessage);
     }
     
     attachFile() {
@@ -327,8 +403,8 @@ User ID: ${message.userId}
         // Сохраняем сообщение
         this.saveMessage(message);
         
-        // Отправляем в канал
-        this.sendToTelegramChannel(message);
+        // Отправляем в бота
+        this.sendToBot(message);
     }
     
     addMessageWithAttachment(message) {
