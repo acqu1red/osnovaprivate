@@ -31,8 +31,10 @@ class CatalystBot:
         """Настройка обработчиков команд"""
         self.application.add_handler(CommandHandler("start", self.start_command))
         self.application.add_handler(CallbackQueryHandler(self.button_callback))
-        # Данные из Mini App (WebApp) приходят в виде web_app_data в сообщении
-        self.application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, self.handle_web_app_data))
+        # Данные из Mini App (WebApp) приходят в виде web_app_data в сообщении.
+        # Используем широкий фильтр, а внутри обработчика проверяем наличие web_app_data,
+        # чтобы не пропустить событие на разных версиях PTB/клиента Telegram
+        self.application.add_handler(MessageHandler(filters.ALL, self.handle_web_app_data))
         
         # Добавляем обработчик ошибок
         self.application.add_error_handler(self.error_handler)

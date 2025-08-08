@@ -31,9 +31,9 @@ class OSNOVAMiniApp {
         // Проверяем права администратора (обновленные ID админов)
         const ADMIN_IDS = [8354723250, 7365307696];
         const ADMIN_USERNAMES = ['acqu1red', 'cashm3thod'];
-        const currentId = parseInt(this.currentUser.id);
-        const currentUsername = (this.currentUser.username || '').toLowerCase();
-        this.isAdmin = ADMIN_IDS.includes(currentId) || ADMIN_USERNAMES.includes(currentUsername);
+        const currentId = Number(this.currentUser.id);
+        const currentUsername = String(this.currentUser.username || '').toLowerCase();
+        this.isAdmin = Boolean(ADMIN_IDS.find(id => Number(id) === currentId) || ADMIN_USERNAMES.find(u => u === currentUsername));
 
         // Если есть параметры в URL от кнопки "Ответить" — открываем сразу чат с пользователем
         this.bootstrapReplyContextFromURL();
