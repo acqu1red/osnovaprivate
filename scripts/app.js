@@ -6,7 +6,8 @@ class OSNOVAMiniApp {
         this.isAdmin = false;
         this.selectedUserId = null;
         this.selectedUserData = null;
-        this.questions = this.loadQuestions();
+        // Изначально пусто; для админа наполним из Supabase, для пользователя — по мере отправки
+        this.questions = {};
         this.currentView = 'chat'; // 'chat', 'admin-panel', 'user-chat'
         this.sb = null; // supabase client (optional)
         this.sbSession = null; // supabase auth session (optional)
@@ -61,12 +62,20 @@ class OSNOVAMiniApp {
         // Инициализируем интерфейс
         this.initUI();
         this.bindEvents();
-        this.loadUserMessages();
+        // Для обычного пользователя подгружаем его локальные сообщения (если есть)
+        if (!this.isAdmin) {
+            this.questions = this.loadQuestions();
+            this.loadUserMessages();
+        }
 
         // Если подключен Supabase — подписываемся и грузим сообщения
         if (this.sb) {
             this.subscribeRealtime();
-            this.fetchAllMessagesFromCloud();
+            await this.fetchAllMessagesFromCloud();
+            // Если это админ — сразу показываем админ‑панель
+            if (this.isAdmin) {
+                this.showAdminPanel();
+            }
         }
         
         // Показываем кнопку админ-панели только для администраторов
@@ -304,7 +313,8 @@ class OSNOVAMiniApp {
             };
         }
         this.questions[ownerId].messages.push(message);
-        this.saveQuestions();
+        // Пользователю — оставим локальный кэш для истории. Админу локально не пишем.
+        if (!this.isAdmin) this.saveQuestions();
         // Всегда дублируем в облако, если доступно (и для пользователя, и для админа)
         this.saveMessageToCloud(message);
     }
@@ -552,30 +562,8 @@ ${data.question}
         document.getElementById('chat-container').style.display = 'none';
         document.getElementById('admin-panel').style.display = 'flex';
         this.loadUsersList();
-        // Добавляем кнопку очистки базы, если отсутствует
-        const header = document.querySelector('.admin-header');
-        if (header && !document.getElementById('clear-db')) {
-            const btn = document.createElement('button');
-            btn.id = 'clear-db';
-            btn.className = 'back-btn';
-            btn.textContent = '🧹 Очистить базу';
-            btn.onclick = () => this.clearDatabase();
-            header.appendChild(btn);
-        }
     }
 
-    clearDatabase() {
-        try {
-            localStorage.removeItem('osnova_questions');
-            this.questions = {};
-            const usersList = document.getElementById('users-list');
-            if (usersList) usersList.innerHTML = '';
-            this.showStatus('Локальная база очищена', 'success');
-        } catch (e) {
-            console.error('clearDatabase error:', e);
-            this.showStatus('Ошибка очистки базы', 'error');
-        }
-    }
     
     showChat() {
         this.currentView = 'chat';
