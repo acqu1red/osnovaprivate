@@ -30,7 +30,7 @@ class OSNOVAMiniApp {
             username: this.tg.initDataUnsafe?.user?.username || 'unknown',
             first_name: this.tg.initDataUnsafe?.user?.first_name || 'User'
         };
-
+        
         // Инициализация Supabase при наличии конфигурации
         const cfg = window.WEB_CONFIG || {};
         if (cfg.SUPABASE_URL && cfg.SUPABASE_ANON_KEY && window.supabase) {
@@ -58,14 +58,14 @@ class OSNOVAMiniApp {
         if (this.sb) {
             await this.ensureSupabaseSession();
         }
-
+        
         // Инициализируем интерфейс
         this.initUI();
         this.bindEvents();
         // Для обычного пользователя: загрузим историю из Supabase
         if (!this.isAdmin && this.sb) {
             await this.fetchMessagesForMe();
-            this.loadUserMessages();
+        this.loadUserMessages();
         }
 
         // Если подключен Supabase — подписываемся и грузим сообщения
@@ -125,7 +125,6 @@ class OSNOVAMiniApp {
                         userId: userId,
                         username: username || 'скрыт'
                     });
-                    this.saveQuestions();
                 }
 
                 // Открываем чат с этим пользователем
@@ -669,7 +668,6 @@ ${data.question}
         
         // Сохраняем ответ
         this.questions[this.selectedUserId].messages.push(reply);
-        this.saveQuestions();
         
         // Отправляем уведомление пользователю через бота
         this.sendUserNotification(reply);
@@ -856,21 +854,13 @@ ${message}
     }
     
     loadQuestions() {
-        try {
-            const stored = localStorage.getItem('osnova_questions');
-            return stored ? JSON.parse(stored) : {};
-        } catch (e) {
-            console.error('Error loading questions:', e);
-            return {};
-        }
+        // Больше не используем localStorage — данные приходят из Supabase
+        return {};
     }
     
     saveQuestions() {
-        try {
-            localStorage.setItem('osnova_questions', JSON.stringify(this.questions));
-        } catch (e) {
-            console.error('Error saving questions:', e);
-        }
+        // Больше не используем localStorage — no-op
+        return;
     }
 }
 
