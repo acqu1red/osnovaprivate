@@ -2,7 +2,7 @@ import logging
 import json
 import asyncio
 from datetime import datetime, timedelta
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo, InputMediaPhoto
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from config import (
     BOT_TOKEN, SUBSCRIPTION_PRICES, CHANNEL_NAME, CHANNEL_DESCRIPTION, 
@@ -58,7 +58,22 @@ class CatalystBot:
         # Запускаем задачи для напоминаний
         asyncio.create_task(self.schedule_reminders(user.id, context))
         
-        await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
+        # Отправляем сообщение с картинкой
+        try:
+            with open('start.png', 'rb') as photo:
+                await update.message.reply_photo(
+                    photo=photo,
+                    caption=welcome_text,
+                    reply_markup=reply_markup,
+                    parse_mode='Markdown'
+                )
+        except FileNotFoundError:
+            # Если картинка не найдена, отправляем только текст
+            await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
+        except Exception as e:
+            logger.error(f"Error sending start message with image: {e}")
+            # Fallback к текстовому сообщению
+            await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
     
     async def schedule_reminders(self, user_id: int, context: ContextTypes.DEFAULT_TYPE):
         """Планирование напоминаний для пользователя"""
@@ -250,7 +265,24 @@ class CatalystBot:
         # Используем новое стартовое сообщение из конфига
         welcome_text = START_MESSAGE.format(user_mention=user_mention)
         
-        await query.edit_message_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
+        # Отправляем сообщение с картинкой
+        try:
+            with open('start.png', 'rb') as photo:
+                await query.edit_message_media(
+                    media=InputMediaPhoto(
+                        media=photo,
+                        caption=welcome_text,
+                        parse_mode='Markdown'
+                    ),
+                    reply_markup=reply_markup
+                )
+        except FileNotFoundError:
+            # Если картинка не найдена, отправляем только текст
+            await query.edit_message_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
+        except Exception as e:
+            logger.error(f"Error sending back to main menu with image: {e}")
+            # Fallback к текстовому сообщению
+            await query.edit_message_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
     
     async def handle_web_app_data(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка данных от Mini App"""
