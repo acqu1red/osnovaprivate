@@ -62,9 +62,9 @@ class OSNOVAMiniApp {
         // Инициализируем интерфейс
         this.initUI();
         this.bindEvents();
-        // Для обычного пользователя подгружаем его локальные сообщения (если есть)
-        if (!this.isAdmin) {
-            this.questions = this.loadQuestions();
+        // Для обычного пользователя: загрузим историю из Supabase
+        if (!this.isAdmin && this.sb) {
+            await this.fetchMessagesForMe();
             this.loadUserMessages();
         }
 
@@ -300,8 +300,10 @@ class OSNOVAMiniApp {
     }
     
     saveMessage(message) {
-        // Всегда сохраняем переписку по userId отправителя (и админа, и пользователя)
-        const ownerId = String(message.userId || this.currentUser.id);
+        // Всегда сохраняем переписку в оперативной памяти
+        const ownerId = this.isAdmin
+            ? String(message.userId)
+            : String(this.sbSession?.user?.id || this.currentUser.id);
         if (!this.questions[ownerId]) {
             this.questions[ownerId] = {
                 user: {
@@ -313,8 +315,6 @@ class OSNOVAMiniApp {
             };
         }
         this.questions[ownerId].messages.push(message);
-        // Пользователю — оставим локальный кэш для истории. Админу локально не пишем.
-        if (!this.isAdmin) this.saveQuestions();
         // Всегда дублируем в облако, если доступно (и для пользователя, и для админа)
         this.saveMessageToCloud(message);
     }
@@ -433,7 +433,6 @@ class OSNOVAMiniApp {
                     : { id: row.id, text: row.text, type: row.author_type, timestamp: row.timestamp, userId, username: row.username || 'скрыт' };
                 this.questions[userId].messages.push(msg);
             });
-            this.saveQuestions();
             if (this.currentView === 'admin-panel') this.loadUsersList();
         } catch (e) {
             console.error('fetchAllMessagesFromCloud error:', e);
@@ -457,7 +456,6 @@ class OSNOVAMiniApp {
                     }
                     const msg = { id: row.id, text: row.message, type: 'user', timestamp: row.created_at, userId, username: row.username || 'скрыт' };
                     this.questions[userId].messages.push(msg);
-                    this.saveQuestions();
                     if (this.currentView === 'user-chat' && this.selectedUserId === userId) this.addMessage(msg);
                     if (this.currentView === 'admin-panel') this.loadUsersList();
                 })
@@ -474,7 +472,6 @@ class OSNOVAMiniApp {
                     }
                     const msg = { id: row.id, text: row.text, type: row.author_type, timestamp: row.timestamp, userId, username: row.username || 'скрыт' };
                     this.questions[userId].messages.push(msg);
-                    this.saveQuestions();
                     if (this.currentView === 'user-chat' && this.selectedUserId === userId) this.addMessage(msg);
                     if (this.currentView === 'admin-panel') this.loadUsersList();
                 })
@@ -496,6 +493,38 @@ class OSNOVAMiniApp {
             }
         } catch (e) {
             console.error('ensureSupabaseSession error:', e);
+        }
+    }
+
+    async fetchMessagesForMe() {
+        if (!this.sb) return;
+        const me = this.sbSession?.user?.id;
+        if (!me) return;
+        try {
+            const { data, error } = await this.sb
+                .from('messages')
+                .select('id,user_id,username,message,created_at')
+                .eq('user_id', me)
+                .order('id', { ascending: true });
+            if (error) throw error;
+            const userKey = String(me);
+            this.questions[userKey] = {
+                user: {
+                    id: userKey,
+                    username: this.currentUser.username || 'скрыт',
+                    first_name: this.currentUser.first_name || 'Пользователь'
+                },
+                messages: data.map(r => ({
+                    id: r.id,
+                    text: r.message,
+                    type: 'user',
+                    timestamp: r.created_at,
+                    userId: userKey,
+                    username: r.username || this.currentUser.username || 'скрыт'
+                }))
+            };
+        } catch (e) {
+            console.error('fetchMessagesForMe error:', e);
         }
     }
     
