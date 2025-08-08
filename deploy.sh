@@ -51,5 +51,6 @@ echo "🌐 Отправляем на GitHub..."
 git push -u origin main
 
 echo "✅ Деплой завершен!"
-echo "📱 Mini App доступен по адресу: https://acqu1red.github.io/osnovaprivate/"
+echo "📱 Mini App будет доступен по адресу: https://acqu1red.github.io/osnovaprivate/"
+echo "⚠️  ВАЖНО: Активируйте GitHub Pages в настройках репозитория!"
 echo "🔗 Добавьте этот URL в настройки бота как MINI_APP_URL"
