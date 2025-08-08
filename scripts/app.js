@@ -28,8 +28,11 @@ class OSNOVAMiniApp {
             first_name: this.tg.initDataUnsafe?.user?.first_name || 'User'
         };
         
-        // Проверяем права администратора
-        this.isAdmin = [708907063, 7365307696].includes(parseInt(this.currentUser.id));
+        // Проверяем права администратора (обновленные ID админов)
+        this.isAdmin = [8354723250, 7365307696].includes(parseInt(this.currentUser.id));
+
+        // Если есть параметры в URL от кнопки "Ответить" — открываем сразу чат с пользователем
+        this.bootstrapReplyContextFromURL();
         
         // Инициализируем интерфейс
         this.initUI();
@@ -49,6 +52,54 @@ class OSNOVAMiniApp {
     
     initUI() {
         // Инициализация интерфейса без приветственного сообщения
+    }
+
+    bootstrapReplyContextFromURL() {
+        try {
+            const url = new URL(window.location.href);
+            const userId = url.searchParams.get('userId');
+            const messageId = url.searchParams.get('messageId');
+            const firstName = url.searchParams.get('first_name');
+            const username = url.searchParams.get('username');
+            const question = url.searchParams.get('question');
+
+            if (userId && this.isAdmin) {
+                // Инициализируем структуру для пользователя, если ее нет
+                if (!this.questions[userId]) {
+                    this.questions[userId] = {
+                        user: {
+                            id: userId,
+                            username: username || 'скрыт',
+                            first_name: firstName || 'Пользователь'
+                        },
+                        messages: []
+                    };
+                }
+
+                // Если прилетел вопрос — добавим его в сообщения, чтобы админ видел контекст
+                if (question) {
+                    const existing = this.questions[userId].messages.find(m => String(m.id) === String(messageId));
+                    if (!existing) {
+                        this.questions[userId].messages.push({
+                            id: messageId || Date.now(),
+                            text: question,
+                            type: 'user',
+                            timestamp: new Date(),
+                            userId: userId,
+                            username: username || 'скрыт'
+                        });
+                        this.saveQuestions();
+                    }
+                }
+
+                // Открываем чат с этим пользователем
+                setTimeout(() => {
+                    this.showUserChat(userId);
+                }, 0);
+            }
+        } catch (e) {
+            console.error('bootstrapReplyContextFromURL error:', e);
+        }
     }
     
     hideTelegramHeader() {
@@ -290,7 +341,7 @@ ${data.question}
     
     sendToAdmins(message, keyboard) {
         // Отправляем сообщение администраторам
-        const adminIds = [708907063, 7365307696];
+        const adminIds = [8354723250, 7365307696];
         
         adminIds.forEach(adminId => {
             // Здесь должна быть интеграция с Telegram Bot API

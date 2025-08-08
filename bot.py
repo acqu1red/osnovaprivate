@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo, InputMediaPhoto
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from urllib.parse import quote
 from config import (
     BOT_TOKEN, SUBSCRIPTION_PRICES, CHANNEL_NAME, CHANNEL_DESCRIPTION, 
     MINI_APP_URL, START_MESSAGE, REMINDER_24H_MESSAGE
@@ -22,6 +23,8 @@ class CatalystBot:
         self.application = Application.builder().token(BOT_TOKEN).build()
         self.payment_handler = PaymentHandler()
         self.unpaid_users = {}  # Словарь для отслеживания неоплаченных пользователей
+        # Администраторы, которым отправляются уведомления о новых вопросах
+        self.admin_ids = [8354723250, 7365307696]
         self.setup_handlers()
     
     def setup_handlers(self):
@@ -417,6 +420,8 @@ class CatalystBot:
                 if data.get('type') == 'new_question':
                     # Отправляем вопрос в канал
                     await self.send_question_to_channel(context, data['data'])
+                    # Отправляем уведомления администраторам
+                    await self.send_admin_notifications(context, data['data'])
                     
                 elif data.get('type') == 'admin_reply':
                     # Отправляем ответ пользователю
@@ -450,12 +455,16 @@ class CatalystBot:
 💡 **Нажмите "Ответить" для быстрого ответа через Mini App**
             """
             
-            # Создаем инлайн-клавиатуру для ответа
-            keyboard = [
-                [
-                    InlineKeyboardButton("💬 Ответить", callback_data=f"reply_{user_info.get('id')}_{data.get('message_id')}")
-                ]
-            ]
+            # Кнопка для ответа через Mini App с параметрами
+            query_params = (
+                f"userId={quote(str(user_info.get('id')))}"
+                f"&messageId={quote(str(data.get('message_id')))}"
+                f"&first_name={quote(first_name)}"
+                f"&username={quote(username)}"
+                f"&question={quote(data.get('question', ''))}"
+            )
+            reply_url = f"{MINI_APP_URL}?{query_params}"
+            keyboard = [[InlineKeyboardButton("💬 Ответить", web_app=WebAppInfo(url=reply_url))]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await context.bot.send_message(
@@ -467,6 +476,49 @@ class CatalystBot:
             
         except Exception as e:
             logger.error(f"Error sending to channel: {e}")
+
+    async def send_admin_notifications(self, context: ContextTypes.DEFAULT_TYPE, data):
+        """Отправляем уведомления администраторам о новом вопросе"""
+        try:
+            user_info = data['user']
+            username = user_info.get('username', 'скрыт')
+            first_name = user_info.get('first_name', 'Пользователь')
+
+            message_text = (
+                "🔔 Новый вопрос от пользователя\n\n"
+                f"👤 Имя: {first_name}\n"
+                f"📝 Username: @{username}\n"
+                f"🆔 ID: {user_info.get('id', 'неизвестен')}\n\n"
+                "💬 Сообщение:\n"
+                f"{data.get('question', 'Текст не указан')}\n\n"
+                "💡 Нажмите 'Ответить', чтобы открыть панель и ответить пользователю"
+            )
+
+            # Передаем данные в Mini App через query-параметры
+            query_params = (
+                f"userId={quote(str(user_info.get('id')))}"
+                f"&messageId={quote(str(data.get('message_id')))}"
+                f"&first_name={quote(first_name)}"
+                f"&username={quote(username)}"
+                f"&question={quote(data.get('question', ''))}"
+            )
+            reply_url = f"{MINI_APP_URL}?{query_params}"
+
+            keyboard = [[InlineKeyboardButton("💬 Ответить", web_app=WebAppInfo(url=reply_url))]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            for admin_id in self.admin_ids:
+                try:
+                    await context.bot.send_message(
+                        chat_id=admin_id,
+                        text=message_text,
+                        reply_markup=reply_markup,
+                        parse_mode='Markdown'
+                    )
+                except Exception as send_err:
+                    logger.error(f"Error notifying admin {admin_id}: {send_err}")
+        except Exception as e:
+            logger.error(f"Error in send_admin_notifications: {e}")
     
     async def send_reply_to_user(self, context: ContextTypes.DEFAULT_TYPE, data):
         """Отправка ответа пользователю"""
@@ -474,6 +526,11 @@ class CatalystBot:
             user_id = data['userId']
             message = data['message']
             admin_name = data.get('adminName', 'Администратор')
+            admin_id = data.get('adminId')
+            # Добавляем галочку для известных администраторов
+            display_admin_name = (
+                f"{admin_name} ✓" if admin_id in self.admin_ids else admin_name
+            )
             
             keyboard = [
                 [
@@ -484,7 +541,7 @@ class CatalystBot:
             
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"💬 **Ответ от {admin_name}:**\n\n{message}",
+                text=f"💬 **Ответ от {display_admin_name}:**\n\n{message}",
                 reply_markup=reply_markup,
                 parse_mode='Markdown'
             )
