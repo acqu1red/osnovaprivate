@@ -26,6 +26,22 @@ class CatalystBot:
         # Администраторы, которым отправляются уведомления о новых вопросах
         self.admin_ids = [8354723250, 7365307696]
         self.setup_handlers()
+
+    @staticmethod
+    def _extract_web_app_data(update: Update):
+        """Надежно извлекает web_app_data из разных типов апдейтов."""
+        try:
+            if update.message and update.message.web_app_data:
+                return update.message.web_app_data
+            if update.edited_message and update.edited_message.web_app_data:
+                return update.edited_message.web_app_data
+            if update.callback_query and update.callback_query.message and update.callback_query.message.web_app_data:
+                return update.callback_query.message.web_app_data
+            if update.effective_message and getattr(update.effective_message, 'web_app_data', None):
+                return update.effective_message.web_app_data
+        except Exception:
+            return None
+        return None
     
     def setup_handlers(self):
         """Настройка обработчиков команд"""
@@ -416,10 +432,15 @@ class CatalystBot:
     async def handle_web_app_data(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка данных от Mini App"""
         try:
-            # Получаем данные от Mini App
-            web_app_data = update.effective_message.web_app_data
+            # Получаем данные от Mini App (надежно)
+            web_app_data = self._extract_web_app_data(update)
             if web_app_data:
-                data = json.loads(web_app_data.data)
+                try:
+                    data = json.loads(web_app_data.data)
+                except Exception as parse_err:
+                    logger.error(f"Invalid web_app_data JSON: {parse_err}; raw={web_app_data.data}")
+                    return
+                logger.info(f"Received web_app_data type={data.get('type')} from user={update.effective_user.id if update.effective_user else 'unknown'}")
                 
                 if data.get('type') == 'new_question':
                     # Отправляем вопрос в канал
@@ -430,6 +451,11 @@ class CatalystBot:
                 elif data.get('type') == 'admin_reply':
                     # Отправляем ответ пользователю
                     await self.send_reply_to_user(context, data['data'])
+                else:
+                    logger.warning(f"Unknown web_app_data type: {data.get('type')}")
+            else:
+                # Игнорируем несвязанные апдейты
+                return
                     
         except Exception as e:
             logger.error(f"Error handling web app data: {e}")

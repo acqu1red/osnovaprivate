@@ -232,10 +232,10 @@ class OSNOVAMiniApp {
         // Добавляем в интерфейс
         this.addMessage(message);
         
-        // Сохраняем в локальное хранилище
+        // Сохраняем в локальное хранилище (каждое сообщение — отдельное событие)
         this.saveMessage(message);
         
-        // Отправляем в Telegram бота
+        // Отправляем в Telegram бота (каждое сообщение — отдельное web_app_data)
         this.sendToBot(message);
         
         // Очищаем поле ввода
@@ -303,8 +303,8 @@ class OSNOVAMiniApp {
         // Отправляем данные в бота через Telegram Web App
         this.tg.sendData(JSON.stringify(botData));
         
-        // Также отправляем через Telegram Bot API (если доступно)
-        this.sendToTelegramAPI(botData);
+        // Также логируем локально для диагностики
+        console.log('sendToBot ->', botData);
     }
     
     sendToTelegramAPI(data) {
