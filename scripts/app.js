@@ -347,14 +347,16 @@ class OSNOVAMiniApp {
         try {
             await this.ensureSupabaseSession();
             const sessionUserId = this.sbSession?.user?.id || null;
+            // Определяем ключ треда по Telegram ID собеседника
+            const threadTelegramId = this.isAdmin ? String(message.userId) : String(this.currentUser.id);
             // Пытаемся писать в таблицу messages (как в вашем SQL). Если есть support_messages — тоже поддержим.
             const commonRow = {
                 user_id: String(sessionUserId || this.currentUser.id),
                 username: this.currentUser.username || null,
                 message: message.text,
+                author_type: message.type || 'user',
                 created_at: new Date(message.timestamp).toISOString(),
-                // Дополнительно пробуем поле telegram_id, если оно существует
-                telegram_id: String(this.currentUser.id)
+                telegram_id: threadTelegramId
             };
             // Сначала пробуем таблицу messages по вашему SQL
             let insertRes = await this.sb.from('messages').insert(commonRow);
@@ -365,6 +367,7 @@ class OSNOVAMiniApp {
                         user_id: commonRow.user_id,
                         username: commonRow.username,
                         message: commonRow.message,
+                        author_type: commonRow.author_type,
                         created_at: commonRow.created_at,
                     });
                     if (error) throw error;
@@ -373,7 +376,7 @@ class OSNOVAMiniApp {
                     const { error } = await this.sb.from('support_messages').insert({
                         user_id: commonRow.user_id,
                         username: commonRow.username,
-                        author_type: message.type,
+                        author_type: commonRow.author_type,
                         text: commonRow.message,
                         timestamp: commonRow.created_at,
                     });
@@ -396,7 +399,7 @@ class OSNOVAMiniApp {
             let fromMessages = true;
             let res = await this.sb
                 .from('messages')
-                .select('id,user_id,username,message,created_at,telegram_id')
+                .select('id,user_id,username,message,author_type,created_at,telegram_id')
                 .order('id', { ascending: true });
             if (res.error) {
                 fromMessages = false;
@@ -428,7 +431,7 @@ class OSNOVAMiniApp {
                     };
                 }
                 const msg = fromMessages
-                    ? { id: row.id, text: row.message, type: 'user', timestamp: row.created_at, userId, username: row.username || 'скрыт' }
+                    ? { id: row.id, text: row.message, type: row.author_type || 'user', timestamp: row.created_at, userId, username: row.username || 'скрыт' }
                     : { id: row.id, text: row.text, type: row.author_type, timestamp: row.timestamp, userId, username: row.username || 'скрыт' };
                 this.questions[userId].messages.push(msg);
             });
@@ -453,7 +456,7 @@ class OSNOVAMiniApp {
                             messages: []
                         };
                     }
-                    const msg = { id: row.id, text: row.message, type: 'user', timestamp: row.created_at, userId, username: row.username || 'скрыт' };
+                    const msg = { id: row.id, text: row.message, type: row.author_type || 'user', timestamp: row.created_at, userId, username: row.username || 'скрыт' };
                     this.questions[userId].messages.push(msg);
                     if (this.currentView === 'user-chat' && this.selectedUserId === userId) this.addMessage(msg);
                     if (this.currentView === 'admin-panel') this.loadUsersList();
