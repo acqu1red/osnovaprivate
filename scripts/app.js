@@ -9,11 +9,12 @@ class OSNOVAMiniApp {
         this.questions = this.loadQuestions();
         this.currentView = 'chat'; // 'chat', 'admin-panel', 'user-chat'
         this.sb = null; // supabase client (optional)
+        this.sbSession = null; // supabase auth session (optional)
         
         this.init();
     }
     
-    init() {
+    async init() {
         // Инициализация Telegram Web App
         this.tg.ready();
         this.tg.expand();
@@ -52,6 +53,11 @@ class OSNOVAMiniApp {
         // Если есть параметры в URL от кнопки "Ответить" — открываем сразу чат с пользователем
         this.bootstrapReplyContextFromURL();
         
+        // Авторизуемся анонимно в Supabase при необходимости
+        if (this.sb) {
+            await this.ensureSupabaseSession();
+        }
+
         // Инициализируем интерфейс
         this.initUI();
         this.bindEvents();
@@ -330,13 +336,43 @@ class OSNOVAMiniApp {
     async saveMessageToCloud(message) {
         if (!this.sb) return;
         try {
-            await this.sb.from('support_messages').insert({
-                user_id: String(message.userId),
-                username: message.username || null,
-                author_type: message.type, // 'user' | 'admin'
-                text: message.text,
-                timestamp: new Date(message.timestamp).toISOString(),
-            });
+            await this.ensureSupabaseSession();
+            const sessionUserId = this.sbSession?.user?.id || null;
+            // Пытаемся писать в таблицу messages (как в вашем SQL). Если есть support_messages — тоже поддержим.
+            const commonRow = {
+                user_id: String(sessionUserId || this.currentUser.id),
+                username: this.currentUser.username || null,
+                message: message.text,
+                created_at: new Date(message.timestamp).toISOString(),
+                // Дополнительно пробуем поле telegram_id, если оно существует
+                telegram_id: String(this.currentUser.id)
+            };
+            // Сначала пробуем таблицу messages по вашему SQL
+            let insertRes = await this.sb.from('messages').insert(commonRow);
+            if (insertRes.error) {
+                // Если колонок нет, пробуем без telegram_id
+                if (String(insertRes.error.message || '').includes('telegram_id')) {
+                    const { error } = await this.sb.from('messages').insert({
+                        user_id: commonRow.user_id,
+                        username: commonRow.username,
+                        message: commonRow.message,
+                        created_at: commonRow.created_at,
+                    });
+                    if (error) throw error;
+                } else if (String(insertRes.error.message || '').includes('relation') || String(insertRes.error.message || '').includes('does not exist')) {
+                    // Если таблицы messages нет, используем support_messages
+                    const { error } = await this.sb.from('support_messages').insert({
+                        user_id: commonRow.user_id,
+                        username: commonRow.username,
+                        author_type: message.type,
+                        text: commonRow.message,
+                        timestamp: commonRow.created_at,
+                    });
+                    if (error) throw error;
+                } else {
+                    throw insertRes.error;
+                }
+            }
         } catch (e) {
             console.error('saveMessageToCloud error:', e);
         }
@@ -345,15 +381,33 @@ class OSNOVAMiniApp {
     async fetchAllMessagesFromCloud() {
         if (!this.sb) return;
         try {
-            const { data, error } = await this.sb
-                .from('support_messages')
-                .select('id,user_id,username,author_type,text,timestamp')
+            // Пытаемся сначала читать из messages (ваш SQL), затем fallback на support_messages
+            let data = null;
+            let error = null;
+            let fromMessages = true;
+            let res = await this.sb
+                .from('messages')
+                .select('id,user_id,username,message,created_at,telegram_id')
                 .order('id', { ascending: true });
+            if (res.error) {
+                fromMessages = false;
+                const res2 = await this.sb
+                    .from('support_messages')
+                    .select('id,user_id,username,author_type,text,timestamp')
+                    .order('id', { ascending: true });
+                data = res2.data;
+                error = res2.error;
+            } else {
+                data = res.data;
+                error = res.error;
+            }
             if (error) throw error;
             // Полная ресинхронизация локальной структуры
             this.questions = {};
             data.forEach(row => {
-                const userId = String(row.user_id);
+                const telegramId = fromMessages ? (row.telegram_id ? String(row.telegram_id) : null) : null;
+                const chatKey = telegramId || (row.username || row.user_id);
+                const userId = String(chatKey);
                 if (!this.questions[userId]) {
                     this.questions[userId] = {
                         user: {
@@ -364,14 +418,10 @@ class OSNOVAMiniApp {
                         messages: []
                     };
                 }
-                this.questions[userId].messages.push({
-                    id: row.id,
-                    text: row.text,
-                    type: row.author_type,
-                    timestamp: row.timestamp,
-                    userId: userId,
-                    username: row.username || 'скрыт'
-                });
+                const msg = fromMessages
+                    ? { id: row.id, text: row.message, type: 'user', timestamp: row.created_at, userId, username: row.username || 'скрыт' }
+                    : { id: row.id, text: row.text, type: row.author_type, timestamp: row.timestamp, userId, username: row.username || 'скрыт' };
+                this.questions[userId].messages.push(msg);
             });
             this.saveQuestions();
             if (this.currentView === 'admin-panel') this.loadUsersList();
@@ -383,38 +433,59 @@ class OSNOVAMiniApp {
     subscribeRealtime() {
         if (!this.sb) return;
         try {
-            this.sb.channel('support_messages_changes')
+            // Подписки и на messages, и на support_messages
+            this.sb.channel('messages_ins')
+                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+                    const row = payload.new;
+                    const chatKey = row.telegram_id ? String(row.telegram_id) : (row.username || row.user_id);
+                    const userId = String(chatKey);
+                    if (!this.questions[userId]) {
+                        this.questions[userId] = {
+                            user: { id: userId, username: row.username || 'скрыт', first_name: row.username || 'Пользователь' },
+                            messages: []
+                        };
+                    }
+                    const msg = { id: row.id, text: row.message, type: 'user', timestamp: row.created_at, userId, username: row.username || 'скрыт' };
+                    this.questions[userId].messages.push(msg);
+                    this.saveQuestions();
+                    if (this.currentView === 'user-chat' && this.selectedUserId === userId) this.addMessage(msg);
+                    if (this.currentView === 'admin-panel') this.loadUsersList();
+                })
+                .subscribe();
+            this.sb.channel('support_messages_ins')
                 .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'support_messages' }, (payload) => {
                     const row = payload.new;
                     const userId = String(row.user_id);
                     if (!this.questions[userId]) {
                         this.questions[userId] = {
-                            user: {
-                                id: userId,
-                                username: row.username || 'скрыт',
-                                first_name: row.username || 'Пользователь'
-                            },
+                            user: { id: userId, username: row.username || 'скрыт', first_name: row.username || 'Пользователь' },
                             messages: []
                         };
                     }
-                    const msg = {
-                        id: row.id,
-                        text: row.text,
-                        type: row.author_type,
-                        timestamp: row.timestamp,
-                        userId: userId,
-                        username: row.username || 'скрыт'
-                    };
+                    const msg = { id: row.id, text: row.text, type: row.author_type, timestamp: row.timestamp, userId, username: row.username || 'скрыт' };
                     this.questions[userId].messages.push(msg);
                     this.saveQuestions();
-                    if (this.currentView === 'user-chat' && this.selectedUserId === userId) {
-                        this.addMessage(msg);
-                    }
+                    if (this.currentView === 'user-chat' && this.selectedUserId === userId) this.addMessage(msg);
                     if (this.currentView === 'admin-panel') this.loadUsersList();
                 })
                 .subscribe();
         } catch (e) {
             console.error('subscribeRealtime error:', e);
+        }
+    }
+
+    async ensureSupabaseSession() {
+        if (!this.sb) return;
+        try {
+            const { data } = await this.sb.auth.getSession();
+            this.sbSession = data.session;
+            if (!this.sbSession) {
+                const { data: signInData, error } = await this.sb.auth.signInAnonymously();
+                if (error) throw error;
+                this.sbSession = signInData.session;
+            }
+        } catch (e) {
+            console.error('ensureSupabaseSession error:', e);
         }
     }
     
