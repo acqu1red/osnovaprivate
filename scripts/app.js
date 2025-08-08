@@ -87,10 +87,6 @@ class OSNOVAMiniApp {
             document.getElementById('back-to-chat').addEventListener('click', () => {
                 this.showChat();
             });
-            
-            document.getElementById('admin-send-btn').addEventListener('click', () => {
-                this.sendAdminReply();
-            });
         }
     }
     

@@ -393,56 +393,6 @@ html {
     background: var(--bg-primary);
 }
 
-.admin-input {
-    padding: 15px;
-    border-top: 1px solid var(--border-dark);
-    display: flex;
-    gap: 10px;
-    background: var(--bg-primary);
-}
-
-#admin-reply {
-    flex: 1;
-    padding: 12px;
-    border: 1px solid var(--border-dark);
-    border-radius: var(--border-radius-lg);
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    font-family: inherit;
-    resize: none;
-    min-height: 50px;
-    transition: var(--transition-smooth);
-    outline: none;
-}
-
-#admin-reply:focus {
-    border-color: var(--accent-light);
-    box-shadow: 0 0 0 3px rgba(237, 233, 213, 0.1);
-}
-
-#admin-reply::placeholder {
-    color: var(--text-secondary);
-}
-
-#admin-send-btn {
-    padding: 12px 20px;
-    background: var(--bg-primary);
-    border: 1px solid var(--border-dark);
-    border-radius: var(--border-radius-lg);
-    color: var(--text-primary);
-    font-weight: bold;
-    cursor: pointer;
-    transition: var(--transition-smooth);
-    box-shadow: var(--shadow-soft);
-}
-
-#admin-send-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-medium);
-    border-color: var(--accent-light);
-    background: rgba(237, 233, 213, 0.05);
-}
-
 /* File attachment */
 .file-attachment {
     margin-top: 10px;
