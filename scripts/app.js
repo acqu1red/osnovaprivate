@@ -8,6 +8,7 @@ class OSNOVAMiniApp {
         this.selectedUserData = null;
         this.questions = this.loadQuestions();
         this.currentView = 'chat'; // 'chat', 'admin-panel', 'user-chat'
+        this.sb = null; // supabase client (optional)
         
         this.init();
     }
@@ -27,6 +28,12 @@ class OSNOVAMiniApp {
             username: this.tg.initDataUnsafe?.user?.username || 'unknown',
             first_name: this.tg.initDataUnsafe?.user?.first_name || 'User'
         };
+
+        // Инициализация Supabase при наличии конфигурации
+        const cfg = window.WEB_CONFIG || {};
+        if (cfg.SUPABASE_URL && cfg.SUPABASE_ANON_KEY && window.supabase) {
+            this.sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
+        }
         
         // Проверяем права администратора (ID/username или query-параметр admin=1)
         const ADMIN_IDS = [8354723250, 7365307696];
@@ -48,6 +55,12 @@ class OSNOVAMiniApp {
         this.initUI();
         this.bindEvents();
         this.loadUserMessages();
+
+        // Если админ и подключен Supabase — подписываемся на новые сообщения из облака
+        if (this.isAdmin && this.sb) {
+            this.subscribeRealtime();
+            this.fetchAllMessagesFromCloud();
+        }
         
         // Показываем кнопку админ-панели только для администраторов
         if (this.isAdmin) {
@@ -285,6 +298,9 @@ class OSNOVAMiniApp {
         }
         this.questions[ownerId].messages.push(message);
         this.saveQuestions();
+
+        // Дублируем в облако, если доступно
+        this.saveMessageToCloud(message);
     }
     
     sendToBot(message) {
@@ -308,6 +324,101 @@ class OSNOVAMiniApp {
         
         // Также логируем локально для диагностики
         console.log('sendToBot ->', botData);
+    }
+
+    // ====== Облачное хранилище (опционально) ======
+    async saveMessageToCloud(message) {
+        if (!this.sb) return;
+        try {
+            await this.sb.from('support_messages').insert({
+                user_id: String(message.userId),
+                username: message.username || null,
+                author_type: message.type, // 'user' | 'admin'
+                text: message.text,
+                timestamp: new Date(message.timestamp).toISOString(),
+            });
+        } catch (e) {
+            console.error('saveMessageToCloud error:', e);
+        }
+    }
+
+    async fetchAllMessagesFromCloud() {
+        if (!this.sb) return;
+        try {
+            const { data, error } = await this.sb
+                .from('support_messages')
+                .select('*')
+                .order('id', { ascending: true });
+            if (error) throw error;
+            // Синхронизируем в локальную структуру
+            data.forEach(row => {
+                const userId = String(row.user_id);
+                if (!this.questions[userId]) {
+                    this.questions[userId] = {
+                        user: {
+                            id: userId,
+                            username: row.username || 'скрыт',
+                            first_name: row.username || 'Пользователь'
+                        },
+                        messages: []
+                    };
+                }
+                this.questions[userId].messages.push({
+                    id: row.id,
+                    text: row.text,
+                    type: row.author_type,
+                    timestamp: row.timestamp,
+                    userId: userId,
+                    username: row.username || 'скрыт'
+                });
+            });
+            this.saveQuestions();
+            // Если открыта админ панель — перерисуем список
+            if (this.currentView === 'admin-panel') {
+                this.loadUsersList();
+            }
+        } catch (e) {
+            console.error('fetchAllMessagesFromCloud error:', e);
+        }
+    }
+
+    subscribeRealtime() {
+        if (!this.sb) return;
+        try {
+            this.sb.channel('support_messages_changes')
+                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'support_messages' }, (payload) => {
+                    const row = payload.new;
+                    const userId = String(row.user_id);
+                    if (!this.questions[userId]) {
+                        this.questions[userId] = {
+                            user: {
+                                id: userId,
+                                username: row.username || 'скрыт',
+                                first_name: row.username || 'Пользователь'
+                            },
+                            messages: []
+                        };
+                    }
+                    this.questions[userId].messages.push({
+                        id: row.id,
+                        text: row.text,
+                        type: row.author_type,
+                        timestamp: row.timestamp,
+                        userId: userId,
+                        username: row.username || 'скрыт'
+                    });
+                    this.saveQuestions();
+                    if (this.currentView === 'user-chat' && this.selectedUserId === userId) {
+                        this.addMessage(this.questions[userId].messages[this.questions[userId].messages.length - 1]);
+                    }
+                    if (this.currentView === 'admin-panel') {
+                        this.loadUsersList();
+                    }
+                })
+                .subscribe();
+        } catch (e) {
+            console.error('subscribeRealtime error:', e);
+        }
     }
     
     sendToTelegramAPI(data) {
