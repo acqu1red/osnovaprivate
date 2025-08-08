@@ -32,6 +32,7 @@ class OSNOVAMiniApp {
         // Инициализация Supabase при наличии конфигурации
         const cfg = window.WEB_CONFIG || {};
         if (cfg.SUPABASE_URL && cfg.SUPABASE_ANON_KEY && window.supabase) {
+            // Поддерживаем синтаксис createClient из CDN
             this.sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
         }
         
@@ -56,8 +57,8 @@ class OSNOVAMiniApp {
         this.bindEvents();
         this.loadUserMessages();
 
-        // Если админ и подключен Supabase — подписываемся на новые сообщения из облака
-        if (this.isAdmin && this.sb) {
+        // Если подключен Supabase — подписываемся и грузим сообщения
+        if (this.sb) {
             this.subscribeRealtime();
             this.fetchAllMessagesFromCloud();
         }
@@ -298,8 +299,7 @@ class OSNOVAMiniApp {
         }
         this.questions[ownerId].messages.push(message);
         this.saveQuestions();
-
-        // Дублируем в облако, если доступно
+        // Всегда дублируем в облако, если доступно (и для пользователя, и для админа)
         this.saveMessageToCloud(message);
     }
     
@@ -347,10 +347,11 @@ class OSNOVAMiniApp {
         try {
             const { data, error } = await this.sb
                 .from('support_messages')
-                .select('*')
+                .select('id,user_id,username,author_type,text,timestamp')
                 .order('id', { ascending: true });
             if (error) throw error;
-            // Синхронизируем в локальную структуру
+            // Полная ресинхронизация локальной структуры
+            this.questions = {};
             data.forEach(row => {
                 const userId = String(row.user_id);
                 if (!this.questions[userId]) {
@@ -373,10 +374,7 @@ class OSNOVAMiniApp {
                 });
             });
             this.saveQuestions();
-            // Если открыта админ панель — перерисуем список
-            if (this.currentView === 'admin-panel') {
-                this.loadUsersList();
-            }
+            if (this.currentView === 'admin-panel') this.loadUsersList();
         } catch (e) {
             console.error('fetchAllMessagesFromCloud error:', e);
         }
@@ -399,21 +397,20 @@ class OSNOVAMiniApp {
                             messages: []
                         };
                     }
-                    this.questions[userId].messages.push({
+                    const msg = {
                         id: row.id,
                         text: row.text,
                         type: row.author_type,
                         timestamp: row.timestamp,
                         userId: userId,
                         username: row.username || 'скрыт'
-                    });
+                    };
+                    this.questions[userId].messages.push(msg);
                     this.saveQuestions();
                     if (this.currentView === 'user-chat' && this.selectedUserId === userId) {
-                        this.addMessage(this.questions[userId].messages[this.questions[userId].messages.length - 1]);
+                        this.addMessage(msg);
                     }
-                    if (this.currentView === 'admin-panel') {
-                        this.loadUsersList();
-                    }
+                    if (this.currentView === 'admin-panel') this.loadUsersList();
                 })
                 .subscribe();
         } catch (e) {
