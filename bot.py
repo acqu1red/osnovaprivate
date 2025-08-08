@@ -239,7 +239,14 @@ class CatalystBot:
     
     def run(self):
         """Запуск бота"""
-        self.application.run_polling(allowed_updates=Update.ALL_TYPES)
+        try:
+            # Очищаем webhook перед запуском
+            self.application.bot.delete_webhook()
+            self.application.run_polling(allowed_updates=Update.ALL_TYPES)
+        except Exception as e:
+            logger.error(f"Error starting bot: {e}")
+            print(f"❌ Ошибка запуска бота: {e}")
+            print("💡 Попробуйте остановить другие процессы бота и запустить заново")
 
 if __name__ == "__main__":
     bot = CatalystBot()
