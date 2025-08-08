@@ -28,12 +28,18 @@ class OSNOVAMiniApp {
             first_name: this.tg.initDataUnsafe?.user?.first_name || 'User'
         };
         
-        // Проверяем права администратора (обновленные ID админов)
+        // Проверяем права администратора (ID/username или query-параметр admin=1)
         const ADMIN_IDS = [8354723250, 7365307696];
         const ADMIN_USERNAMES = ['acqu1red', 'cashm3thod'];
         const currentId = Number(this.currentUser.id);
         const currentUsername = String(this.currentUser.username || '').toLowerCase();
-        this.isAdmin = Boolean(ADMIN_IDS.find(id => Number(id) === currentId) || ADMIN_USERNAMES.find(u => u === currentUsername));
+        const url = new URL(window.location.href);
+        const adminFlag = url.searchParams.get('admin');
+        this.isAdmin = Boolean(
+            ADMIN_IDS.includes(currentId) ||
+            ADMIN_USERNAMES.includes(currentUsername) ||
+            adminFlag === '1'
+        );
 
         // Если есть параметры в URL от кнопки "Ответить" — открываем сразу чат с пользователем
         this.bootstrapReplyContextFromURL();
@@ -82,18 +88,15 @@ class OSNOVAMiniApp {
 
                 // Если прилетел вопрос — добавим его в сообщения, чтобы админ видел контекст
                 if (question) {
-                    const existing = this.questions[userId].messages.find(m => String(m.id) === String(messageId));
-                    if (!existing) {
-                        this.questions[userId].messages.push({
-                            id: messageId || Date.now(),
-                            text: question,
-                            type: 'user',
-                            timestamp: new Date(),
-                            userId: userId,
-                            username: username || 'скрыт'
-                        });
-                        this.saveQuestions();
-                    }
+                    this.questions[userId].messages.push({
+                        id: messageId || Date.now(),
+                        text: question,
+                        type: 'user',
+                        timestamp: new Date(),
+                        userId: userId,
+                        username: username || 'скрыт'
+                    });
+                    this.saveQuestions();
                 }
 
                 // Открываем чат с этим пользователем
@@ -268,19 +271,19 @@ class OSNOVAMiniApp {
     }
     
     saveMessage(message) {
-        // Добавляем сообщение в локальное хранилище
-        if (!this.questions[this.currentUser.id]) {
-            this.questions[this.currentUser.id] = {
+        // Всегда сохраняем переписку по userId отправителя (и админа, и пользователя)
+        const ownerId = String(message.userId || this.currentUser.id);
+        if (!this.questions[ownerId]) {
+            this.questions[ownerId] = {
                 user: {
-                    id: this.currentUser.id,
-                    username: this.currentUser.username,
+                    id: ownerId,
+                    username: message.username || this.currentUser.username,
                     first_name: this.currentUser.first_name
                 },
                 messages: []
             };
         }
-        
-        this.questions[this.currentUser.id].messages.push(message);
+        this.questions[ownerId].messages.push(message);
         this.saveQuestions();
     }
     
@@ -510,8 +513,8 @@ ${data.question}
         // Отправляем через Telegram Web App
         this.tg.sendData(JSON.stringify(notification));
         
-        // Отправляем уведомление пользователю через бота
-        this.sendUserMessage(reply.userId, adminName, reply.text);
+        // Локально добавляем запись и для админа (чтобы история ответа отображалась сразу)
+        this.saveMessage(reply);
     }
     
     sendUserMessage(userId, adminName, message) {

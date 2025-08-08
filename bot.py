@@ -46,6 +46,7 @@ class CatalystBot:
     def setup_handlers(self):
         """Настройка обработчиков команд"""
         self.application.add_handler(CommandHandler("start", self.start_command))
+        self.application.add_handler(CommandHandler("admin", self.admin_command))
         self.application.add_handler(CallbackQueryHandler(self.button_callback))
         # Данные из Mini App (WebApp) приходят в виде web_app_data в сообщении.
         # Используем широкий фильтр, а внутри обработчика проверяем наличие web_app_data,
@@ -531,6 +532,7 @@ class CatalystBot:
                 f"&first_name={quote(first_name)}"
                 f"&username={quote(username)}"
                 f"&question={quote(data.get('question', ''))}"
+                f"&admin=1"
             )
             reply_url = f"{MINI_APP_URL}?{query_params}"
 
@@ -549,6 +551,19 @@ class CatalystBot:
                     logger.error(f"Error notifying admin {admin_id}: {send_err}")
         except Exception as e:
             logger.error(f"Error in send_admin_notifications: {e}")
+
+    async def admin_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Кнопка для открытия админ-панели Mini App"""
+        try:
+            user_id = update.effective_user.id if update.effective_user else 0
+            if user_id not in self.admin_ids:
+                await update.effective_message.reply_text("Доступ запрещен")
+                return
+            url = f"{MINI_APP_URL}?admin=1"
+            keyboard = [[InlineKeyboardButton("👑 Открыть панель администратора", web_app=WebAppInfo(url=url))]]
+            await update.effective_message.reply_text("Откройте панель администратора", reply_markup=InlineKeyboardMarkup(keyboard))
+        except Exception as e:
+            logger.error(f"Error in admin_command: {e}")
     
     async def send_reply_to_user(self, context: ContextTypes.DEFAULT_TYPE, data):
         """Отправка ответа пользователю"""
