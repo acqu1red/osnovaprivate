@@ -1,9 +1,9 @@
-import logging
+import os
 import json
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
-from config import BOT_TOKEN, SUBSCRIPTION_PRICES, CHANNEL_NAME, CHANNEL_DESCRIPTION, MINI_APP_URL
-from payment_handler import PaymentHandler
+import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from config import BOT_TOKEN, ADMIN_IDS
 
 # Настройка логирования
 logging.basicConfig(
@@ -12,242 +12,184 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class CatalystBot:
+class OSNOVABot:
     def __init__(self):
         self.application = Application.builder().token(BOT_TOKEN).build()
-        self.payment_handler = PaymentHandler()
         self.setup_handlers()
-    
-    def setup_handlers(self):
-        """Настройка обработчиков команд"""
-        self.application.add_handler(CommandHandler("start", self.start_command))
-        self.application.add_handler(CallbackQueryHandler(self.button_callback))
-    
-    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработчик команды /start"""
-        keyboard = [
-            [
-                InlineKeyboardButton("💳 Оплатить доступ", callback_data="payment_menu"),
-                InlineKeyboardButton("📋 Подробнее о канале", callback_data="channel_info")
-            ],
-            [
-                InlineKeyboardButton("❓ Задать вопрос", web_app=WebAppInfo(url=MINI_APP_URL))
-            ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
         
+    def setup_handlers(self):
+        """Настройка обработчиков команд и сообщений"""
+        self.application.add_handler(CommandHandler("start", self.start_command))
+        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
+        self.application.add_handler(CallbackQueryHandler(self.handle_callback))
+        
+    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка команды /start"""
+        user = update.effective_user
         welcome_text = f"""
-🌟 Добро пожаловать в официальный бот канала CATALYST CLUB!
+👋 Добро пожаловать в ОСНОВА!
 
-🔐 Здесь вы можете узнать больше о закрытом канале "{CHANNEL_NAME}" и получить к нему доступ.
+Я бот для доступа к закрытому каналу с техникой OSNOVA.
 
-💎 **Подписка**: ежемесячная 1500₽ или ~14$
-💳 Оплата принимается в любой валюте, криптовалюте, звездах
+🔗 Для использования откройте Mini App:
+https://acqu1red.github.io/osnovaprivate/
 
-Выберите действие ниже ⬇️
+📝 Задайте любой вопрос, и администраторы ответят вам в ближайшее время.
         """
         
-        await update.message.reply_text(welcome_text, reply_markup=reply_markup)
+        await update.message.reply_text(welcome_text)
+        
+    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка обычных сообщений"""
+        user = update.effective_user
+        message_text = update.message.text
+        
+        # Если сообщение от админа и содержит ответ пользователю
+        if user.id in ADMIN_IDS and message_text.startswith("Ответить"):
+            await self.handle_admin_reply(update, context)
+        else:
+            # Обычное сообщение - отправляем в Mini App
+            await self.redirect_to_mini_app(update, context)
     
-    async def button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработчик нажатий на инлайн-кнопки"""
+    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка callback запросов от inline кнопок"""
         query = update.callback_query
         await query.answer()
         
-        if query.data == "payment_menu":
-            await self.show_payment_menu(query)
-        elif query.data == "channel_info":
-            await self.show_channel_info(query)
-        elif query.data == "back_to_main":
-            await self.back_to_main_menu(query)
-        elif query.data in ["1_month", "6_months", "12_months"]:
-            await self.show_payment_options(query)
-        elif query.data == "back_to_payment":
-            await self.show_payment_menu(query)
-        elif query.data == "card_payment":
-            await self.payment_handler.process_card_payment(update, context, "1_month")
-        elif query.data == "terms":
-            await self.payment_handler.show_terms(update, context)
-        elif query.data == "web_app_data":
-            await self.handle_web_app_data(update, context)
-    
-    async def show_payment_menu(self, query):
-        """Показать меню оплаты"""
-        keyboard = [
-            [
-                InlineKeyboardButton("1️⃣ 1 месяц - 1500₽", callback_data="1_month"),
-                InlineKeyboardButton("6️⃣ 6 месяцев - 8000₽", callback_data="6_months")
-            ],
-            [
-                InlineKeyboardButton("1️⃣2️⃣ 12 месяцев - 10000₽", callback_data="12_months")
-            ],
-            [
-                InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")
-            ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        payment_text = """
-💵 **Стоимость подписки на Базу**
-
-📅 **1 месяц**: 1500 рублей
-📅 **6 месяцев**: 8000 рублей  
-📅 **12 месяцев**: 10000 рублей
-
-💱 *Цена в долларах/евро конвертируется по текущему курсу*
-💳 *Оплачивайте любой картой в долларах/евро/рублях*
-
-Выберите удобный тариф ⬇️
-        """
-        
-        await query.edit_message_text(payment_text, reply_markup=reply_markup)
-    
-    async def show_payment_options(self, query):
-        """Показать варианты оплаты для выбранного тарифа"""
-        duration_map = {
-            "1_month": "1 месяц",
-            "6_months": "6 месяцев", 
-            "12_months": "12 месяцев"
-        }
-        
-        duration = duration_map.get(query.data, "1 месяц")
-        
-        keyboard = [
-            [
-                InlineKeyboardButton("💳 Карта (любая валюта)", callback_data="card_payment")
-            ],
-            [
-                InlineKeyboardButton("❓ Задать вопрос", web_app=WebAppInfo(url=MINI_APP_URL))
-            ],
-            [
-                InlineKeyboardButton("📄 Договор оферты", callback_data="terms")
-            ],
-            [
-                InlineKeyboardButton("⬅️ Назад", callback_data="back_to_payment")
-            ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        payment_options_text = f"""
-🦍 **ЗАКРЫТЫЙ КАНАЛ "{CHANNEL_NAME}" на {duration}**
-
-Выберите удобный вид оплаты:
-
-⚠️ *Если вы из Украины, включите VPN*
-💳 *При оплате картой оформляется автосписание каждые 30 дней*
-⚙️ *Далее вы сможете управлять подпиской в Меню бота*
-🪙 *Оплата криптой доступна на тарифах 6/12 мес*
-        """
-        
-        await query.edit_message_text(payment_options_text, reply_markup=reply_markup)
-    
-    async def show_channel_info(self, query):
-        """Показать информацию о канале"""
-        keyboard = [
-            [
-                InlineKeyboardButton("❓ Задать вопрос", web_app=WebAppInfo(url=MINI_APP_URL))
-            ],
-            [
-                InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")
-            ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(CHANNEL_DESCRIPTION, reply_markup=reply_markup)
-    
-    async def back_to_main_menu(self, query):
-        """Вернуться в главное меню"""
-        keyboard = [
-            [
-                InlineKeyboardButton("💳 Оплатить доступ", callback_data="payment_menu"),
-                InlineKeyboardButton("📋 Подробнее о канале", callback_data="channel_info")
-            ],
-            [
-                InlineKeyboardButton("❓ Задать вопрос", web_app=WebAppInfo(url=MINI_APP_URL))
-            ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        welcome_text = f"""
-🌟 Добро пожаловать в официальный бот канала CATALYST CLUB!
-
-🔐 Здесь вы можете узнать больше о закрытом канале "{CHANNEL_NAME}" и получить к нему доступ.
-
-💎 **Подписка**: ежемесячная 1500₽ или ~14$
-💳 Оплата принимается в любой валюте, криптовалюте, звездах
-
-Выберите действие ниже ⬇️
-        """
-        
-        await query.edit_message_text(welcome_text, reply_markup=reply_markup)
-    
-    async def handle_web_app_data(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработка данных от Mini App"""
-        try:
-            # Получаем данные от Mini App
-            web_app_data = update.effective_message.web_app_data
-            if web_app_data:
-                data = json.loads(web_app_data.data)
-                
-                if data.get('type') == 'new_question':
-                    # Отправляем вопрос в канал
-                    await self.send_question_to_channel(context, data['data'])
-                    
-                elif data.get('type') == 'admin_reply':
-                    # Отправляем ответ пользователю
-                    await self.send_reply_to_user(context, data['data'])
-                    
-        except Exception as e:
-            logger.error(f"Error handling web app data: {e}")
-    
-    async def send_question_to_channel(self, context: ContextTypes.DEFAULT_TYPE, data):
-        """Отправка вопроса в канал"""
-        try:
-            channel_id = -1002686841761
-            message_text = data['message']
-            
-            await context.bot.send_message(
-                chat_id=channel_id,
-                text=message_text,
-                parse_mode='HTML'
+        if query.data == "reply_to_user":
+            # Открываем Mini App с панелью администратора
+            mini_app_url = "https://acqu1red.github.io/osnovaprivate/?admin=true"
+            await query.edit_message_reply_markup(
+                InlineKeyboardMarkup([[
+                    InlineKeyboardButton("Открыть панель администратора", url=mini_app_url)
+                ]])
             )
-            
-        except Exception as e:
-            logger.error(f"Error sending to channel: {e}")
     
-    async def send_reply_to_user(self, context: ContextTypes.DEFAULT_TYPE, data):
-        """Отправка ответа пользователю"""
+    async def handle_admin_reply(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка ответа администратора"""
+        user = update.effective_user
+        message_text = update.message.text
+        
         try:
-            user_id = data['userId']
-            message = data['message']
+            # Парсим ответ администратора
+            # Формат: "Ответить [user_id]: [message]"
+            if ":" in message_text:
+                parts = message_text.split(":", 1)
+                user_id_part = parts[0].replace("Ответить", "").strip()
+                reply_text = parts[1].strip()
+                
+                try:
+                    target_user_id = int(user_id_part)
+                    
+                    # Отправляем ответ пользователю
+                    await context.bot.send_message(
+                        chat_id=target_user_id,
+                        text=f"💬 Ответ от администратора:\n\n{reply_text}"
+                    )
+                    
+                    await update.message.reply_text("✅ Ответ отправлен пользователю!")
+                    
+                except ValueError:
+                    await update.message.reply_text("❌ Неверный формат. Используйте: Ответить [ID]: [сообщение]")
+            else:
+                await update.message.reply_text("❌ Неверный формат. Используйте: Ответить [ID]: [сообщение]")
+                
+        except Exception as e:
+            logger.error(f"Error handling admin reply: {e}")
+            await update.message.reply_text("❌ Ошибка при отправке ответа")
+    
+    async def redirect_to_mini_app(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Перенаправление в Mini App"""
+        mini_app_url = "https://acqu1red.github.io/osnovaprivate/"
+        
+        keyboard = [[InlineKeyboardButton("Открыть чат", url=mini_app_url)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            "🔗 Для отправки сообщения откройте Mini App:",
+            reply_markup=reply_markup
+        )
+    
+    async def handle_webapp_data(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка данных от Web App"""
+        try:
+            # Получаем данные от Web App
+            web_app_data = update.message.web_app_data.data
+            data = json.loads(web_app_data)
             
-            keyboard = [
-                [
-                    InlineKeyboardButton("💬 Открыть чат", web_app=WebAppInfo(url=MINI_APP_URL))
-                ]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
+            if data.get("type") == "new_question":
+                await self.handle_new_question(update, context, data["data"])
+            elif data.get("type") == "admin_reply":
+                await self.handle_admin_reply_data(update, context, data["data"])
+                
+        except Exception as e:
+            logger.error(f"Error handling webapp data: {e}")
+    
+    async def handle_new_question(self, update: Update, context: ContextTypes.DEFAULT_TYPE, data):
+        """Обработка нового вопроса от пользователя"""
+        user_id = data["user"]["id"]
+        username = data["user"]["username"] or "скрыт"
+        question = data["question"]
+        
+        # Формируем сообщение для админов
+        admin_message = f"""
+❓ Новый запрос от пользователя
+
+👤 Пользователь: @{username}
+🆔 ID: {user_id}
+💬 Сообщение: {question}
+
+Нажмите кнопку ниже для ответа:
+        """
+        
+        # Создаем inline кнопку для ответа
+        keyboard = [[
+            InlineKeyboardButton("Ответить", callback_data="reply_to_user")
+        ]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Отправляем уведомление всем админам
+        for admin_id in ADMIN_IDS:
+            try:
+                await context.bot.send_message(
+                    chat_id=admin_id,
+                    text=admin_message,
+                    reply_markup=reply_markup
+                )
+            except Exception as e:
+                logger.error(f"Error sending notification to admin {admin_id}: {e}")
+    
+    async def handle_admin_reply_data(self, update: Update, context: ContextTypes.DEFAULT_TYPE, data):
+        """Обработка ответа администратора через Web App"""
+        user_id = data["userId"]
+        message = data["message"]
+        admin_id = data["adminId"]
+        
+        try:
+            # Отправляем ответ пользователю
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"📩 Ответ на ваш вопрос:\n\n{message}",
-                reply_markup=reply_markup
+                text=f"💬 Ответ от администратора:\n\n{message}"
+            )
+            
+            # Подтверждаем админу
+            await context.bot.send_message(
+                chat_id=admin_id,
+                text="✅ Ответ успешно отправлен пользователю!"
             )
             
         except Exception as e:
-            logger.error(f"Error sending reply to user: {e}")
+            logger.error(f"Error sending admin reply: {e}")
+            await context.bot.send_message(
+                chat_id=admin_id,
+                text="❌ Ошибка при отправке ответа пользователю"
+            )
     
     def run(self):
         """Запуск бота"""
-        try:
-            # Очищаем webhook перед запуском
-            self.application.bot.delete_webhook()
-            self.application.run_polling(allowed_updates=Update.ALL_TYPES)
-        except Exception as e:
-            logger.error(f"Error starting bot: {e}")
-            print(f"❌ Ошибка запуска бота: {e}")
-            print("💡 Попробуйте остановить другие процессы бота и запустить заново")
+        logger.info("Starting OSNOVA Bot...")
+        self.application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
-    bot = CatalystBot()
+    bot = OSNOVABot()
     bot.run()
