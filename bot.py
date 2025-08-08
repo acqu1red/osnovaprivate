@@ -28,6 +28,31 @@ class CatalystBot:
         """Настройка обработчиков команд"""
         self.application.add_handler(CommandHandler("start", self.start_command))
         self.application.add_handler(CallbackQueryHandler(self.button_callback))
+        
+        # Добавляем обработчик ошибок
+        self.application.add_error_handler(self.error_handler)
+    
+    async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработчик ошибок"""
+        logger.error(f"Exception while handling an update: {context.error}")
+        
+        # Логируем детали ошибки
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        # Если это ошибка с callback query, просто логируем её
+        if "Query is too old" in str(context.error) or "query id is invalid" in str(context.error):
+            logger.warning("Callback query expired or invalid - ignoring")
+            return
+        
+        # Для других ошибок можно отправить сообщение пользователю
+        if update and update.effective_message:
+            try:
+                await update.effective_message.reply_text(
+                    "Произошла ошибка при обработке вашего запроса. Попробуйте еще раз."
+                )
+            except Exception as e:
+                logger.error(f"Could not send error message to user: {e}")
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /start"""
@@ -140,42 +165,57 @@ class CatalystBot:
     async def button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик нажатий на инлайн-кнопки"""
         query = update.callback_query
-        await query.answer()
         
-        if query.data == "payment_menu":
-            await self.show_payment_menu(query)
-        elif query.data == "channel_info":
-            await self.show_channel_info(query)
-        elif query.data == "back_to_main":
-            await self.back_to_main_menu(query)
-        elif query.data in ["1_month", "6_months", "12_months"]:
-            await self.show_payment_options(query)
-        elif query.data == "back_to_payment":
-            await self.show_payment_menu(query)
-        elif query.data == "card_payment":
-            await self.payment_handler.process_card_payment(update, context, "1_month")
-        elif query.data == "terms":
-            await self.payment_handler.show_terms(update, context)
-        elif query.data == "web_app_data":
-            await self.handle_web_app_data(update, context)
+        # Безопасно отвечаем на callback query
+        try:
+            await query.answer()
+        except Exception as e:
+            logger.warning(f"Could not answer callback query: {e}")
+            # Продолжаем выполнение даже если не удалось ответить на callback
+        
+        try:
+            if query.data == "payment_menu":
+                await self.show_payment_menu(query)
+            elif query.data == "channel_info":
+                await self.show_channel_info(query)
+            elif query.data == "back_to_main":
+                await self.back_to_main_menu(query)
+            elif query.data in ["1_month", "6_months", "12_months"]:
+                await self.show_payment_options(query)
+            elif query.data == "back_to_payment":
+                await self.show_payment_menu(query)
+            elif query.data == "card_payment":
+                await self.payment_handler.process_card_payment(update, context, "1_month")
+            elif query.data == "terms":
+                await self.payment_handler.show_terms(update, context)
+            elif query.data == "web_app_data":
+                await self.handle_web_app_data(update, context)
+        except Exception as e:
+            logger.error(f"Error in button_callback for data '{query.data}': {e}")
+            # Пытаемся отправить сообщение об ошибке пользователю
+            try:
+                await query.message.reply_text("Произошла ошибка при обработке запроса. Попробуйте еще раз.")
+            except Exception as reply_error:
+                logger.error(f"Could not send error reply: {reply_error}")
     
     async def show_payment_menu(self, query):
         """Показать меню оплаты"""
-        keyboard = [
-            [
-                InlineKeyboardButton("1️⃣ 1 месяц - 1500₽", callback_data="1_month"),
-                InlineKeyboardButton("6️⃣ 6 месяцев - 8000₽", callback_data="6_months")
-            ],
-            [
-                InlineKeyboardButton("1️⃣2️⃣ 12 месяцев - 10000₽", callback_data="12_months")
-            ],
-            [
-                InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")
+        try:
+            keyboard = [
+                [
+                    InlineKeyboardButton("1️⃣ 1 месяц - 1500₽", callback_data="1_month"),
+                    InlineKeyboardButton("6️⃣ 6 месяцев - 8000₽", callback_data="6_months")
+                ],
+                [
+                    InlineKeyboardButton("1️⃣2️⃣ 12 месяцев - 10000₽", callback_data="12_months")
+                ],
+                [
+                    InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")
+                ]
             ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        payment_text = """
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            payment_text = """
 💵 **Стоимость подписки на ФОРМУЛА**
 
 📅 **1 месяц**: 1500 рублей
@@ -186,37 +226,63 @@ class CatalystBot:
 💳 *Оплачивайте любой картой в долларах/евро/рублях*
 
 Выберите удобный тариф ⬇️
-        """
-        
-        await query.edit_message_text(payment_text, reply_markup=reply_markup, parse_mode='Markdown')
+            """
+            
+            # Проверяем, есть ли фото в сообщении
+            if query.message.photo:
+                # Если есть фото, редактируем медиа
+                try:
+                    with open('start.png', 'rb') as photo:
+                        await query.edit_message_media(
+                            media=InputMediaPhoto(
+                                media=photo,
+                                caption=payment_text,
+                                parse_mode='Markdown'
+                            ),
+                            reply_markup=reply_markup
+                        )
+                except FileNotFoundError:
+                    # Если файл изображения не найден, редактируем только текст
+                    await query.edit_message_text(payment_text, reply_markup=reply_markup, parse_mode='Markdown')
+            else:
+                # Если нет фото, редактируем текст
+                await query.edit_message_text(payment_text, reply_markup=reply_markup, parse_mode='Markdown')
+        except Exception as e:
+            logger.error(f"Error in show_payment_menu: {e}")
+            # Пытаемся отправить новое сообщение если редактирование не удалось
+            try:
+                await query.message.reply_text("Произошла ошибка. Попробуйте еще раз.")
+            except Exception as reply_error:
+                logger.error(f"Could not send error reply: {reply_error}")
     
     async def show_payment_options(self, query):
         """Показать варианты оплаты для выбранного тарифа"""
-        duration_map = {
-            "1_month": "1 месяц",
-            "6_months": "6 месяцев", 
-            "12_months": "12 месяцев"
-        }
-        
-        duration = duration_map.get(query.data, "1 месяц")
-        
-        keyboard = [
-            [
-                InlineKeyboardButton("💳 Карта (любая валюта)", callback_data="card_payment")
-            ],
-            [
-                InlineKeyboardButton("❓ Задать вопрос", web_app=WebAppInfo(url=MINI_APP_URL))
-            ],
-            [
-                InlineKeyboardButton("📄 Договор оферты", callback_data="terms")
-            ],
-            [
-                InlineKeyboardButton("⬅️ Назад", callback_data="back_to_payment")
+        try:
+            duration_map = {
+                "1_month": "1 месяц",
+                "6_months": "6 месяцев", 
+                "12_months": "12 месяцев"
+            }
+            
+            duration = duration_map.get(query.data, "1 месяц")
+            
+            keyboard = [
+                [
+                    InlineKeyboardButton("💳 Карта (любая валюта)", callback_data="card_payment")
+                ],
+                [
+                    InlineKeyboardButton("❓ Задать вопрос", web_app=WebAppInfo(url=MINI_APP_URL))
+                ],
+                [
+                    InlineKeyboardButton("📄 Договор оферты", callback_data="terms")
+                ],
+                [
+                    InlineKeyboardButton("⬅️ Назад", callback_data="back_to_payment")
+                ]
             ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        payment_options_text = f"""
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            payment_options_text = f"""
 🦍 **ЗАКРЫТЫЙ КАНАЛ "{CHANNEL_NAME}" на {duration}**
 
 Выберите удобный вид оплаты:
@@ -225,64 +291,120 @@ class CatalystBot:
 💳 *При оплате картой оформляется автосписание каждые 30 дней*
 ⚙️ *Далее вы сможете управлять подпиской в Меню бота*
 🪙 *Оплата криптой доступна на тарифах 6/12 мес*
-        """
-        
-        await query.edit_message_text(payment_options_text, reply_markup=reply_markup, parse_mode='Markdown')
+            """
+            
+            # Проверяем, есть ли фото в сообщении
+            if query.message.photo:
+                # Если есть фото, редактируем медиа
+                try:
+                    with open('start.png', 'rb') as photo:
+                        await query.edit_message_media(
+                            media=InputMediaPhoto(
+                                media=photo,
+                                caption=payment_options_text,
+                                parse_mode='Markdown'
+                            ),
+                            reply_markup=reply_markup
+                        )
+                except FileNotFoundError:
+                    # Если файл изображения не найден, редактируем только текст
+                    await query.edit_message_text(payment_options_text, reply_markup=reply_markup, parse_mode='Markdown')
+            else:
+                # Если нет фото, редактируем текст
+                await query.edit_message_text(payment_options_text, reply_markup=reply_markup, parse_mode='Markdown')
+        except Exception as e:
+            logger.error(f"Error in show_payment_options: {e}")
+            try:
+                await query.message.reply_text("Произошла ошибка. Попробуйте еще раз.")
+            except Exception as reply_error:
+                logger.error(f"Could not send error reply: {reply_error}")
     
     async def show_channel_info(self, query):
         """Показать информацию о канале"""
-        keyboard = [
-            [
-                InlineKeyboardButton("💳 Оплатить доступ", callback_data="payment_menu")
-            ],
-            [
-                InlineKeyboardButton("❓ Задать вопрос", web_app=WebAppInfo(url=MINI_APP_URL))
-            ],
-            [
-                InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")
+        try:
+            keyboard = [
+                [
+                    InlineKeyboardButton("💳 Оплатить доступ", callback_data="payment_menu")
+                ],
+                [
+                    InlineKeyboardButton("❓ Задать вопрос", web_app=WebAppInfo(url=MINI_APP_URL))
+                ],
+                [
+                    InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")
+                ]
             ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(CHANNEL_DESCRIPTION, reply_markup=reply_markup, parse_mode='Markdown')
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            # Проверяем, есть ли фото в сообщении
+            if query.message.photo:
+                # Если есть фото, редактируем медиа
+                try:
+                    with open('start.png', 'rb') as photo:
+                        await query.edit_message_media(
+                            media=InputMediaPhoto(
+                                media=photo,
+                                caption=CHANNEL_DESCRIPTION,
+                                parse_mode='Markdown'
+                            ),
+                            reply_markup=reply_markup
+                        )
+                except FileNotFoundError:
+                    # Если файл изображения не найден, редактируем только текст
+                    await query.edit_message_text(CHANNEL_DESCRIPTION, reply_markup=reply_markup, parse_mode='Markdown')
+            else:
+                # Если нет фото, редактируем текст
+                await query.edit_message_text(CHANNEL_DESCRIPTION, reply_markup=reply_markup, parse_mode='Markdown')
+        except Exception as e:
+            logger.error(f"Error in show_channel_info: {e}")
+            try:
+                await query.message.reply_text("Произошла ошибка. Попробуйте еще раз.")
+            except Exception as reply_error:
+                logger.error(f"Could not send error reply: {reply_error}")
     
     async def back_to_main_menu(self, query):
         """Вернуться в главное меню"""
-        user = query.from_user
-        user_mention = f"[{user.first_name}](tg://user?id={user.id})" if user.first_name else f"[Пользователь](tg://user?id={user.id})"
-        
-        keyboard = [
-            [
-                InlineKeyboardButton("💳 Оплатить доступ", callback_data="payment_menu"),
-                InlineKeyboardButton("📋 Подробнее о канале", callback_data="channel_info")
-            ],
-            [
-                InlineKeyboardButton("❓ Задать вопрос", web_app=WebAppInfo(url=MINI_APP_URL))
-            ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        # Используем новое стартовое сообщение из конфига
-        welcome_text = START_MESSAGE.format(user_mention=user_mention)
-        
-        # Отправляем сообщение с картинкой
         try:
-            with open('start.png', 'rb') as photo:
-                await query.edit_message_media(
-                    media=InputMediaPhoto(
-                        media=photo,
-                        caption=welcome_text,
-                        parse_mode='Markdown'
-                    ),
-                    reply_markup=reply_markup
-                )
-        except FileNotFoundError:
-            # Если картинка не найдена, отправляем только текст
-            await query.edit_message_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
+            user = query.from_user
+            user_mention = f"[{user.first_name}](tg://user?id={user.id})" if user.first_name else f"[Пользователь](tg://user?id={user.id})"
+            
+            keyboard = [
+                [
+                    InlineKeyboardButton("💳 Оплатить доступ", callback_data="payment_menu"),
+                    InlineKeyboardButton("📋 Подробнее о канале", callback_data="channel_info")
+                ],
+                [
+                    InlineKeyboardButton("❓ Задать вопрос", web_app=WebAppInfo(url=MINI_APP_URL))
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            # Используем новое стартовое сообщение из конфига
+            welcome_text = START_MESSAGE.format(user_mention=user_mention)
+            
+            # Отправляем сообщение с картинкой
+            try:
+                with open('start.png', 'rb') as photo:
+                    await query.edit_message_media(
+                        media=InputMediaPhoto(
+                            media=photo,
+                            caption=welcome_text,
+                            parse_mode='Markdown'
+                        ),
+                        reply_markup=reply_markup
+                    )
+            except FileNotFoundError:
+                # Если картинка не найдена, отправляем только текст
+                await query.edit_message_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
+            except Exception as e:
+                logger.error(f"Error sending back to main menu with image: {e}")
+                # Fallback к текстовому сообщению
+                await query.edit_message_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
         except Exception as e:
-            logger.error(f"Error sending back to main menu with image: {e}")
-            # Fallback к текстовому сообщению
-            await query.edit_message_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
+            logger.error(f"Error in back_to_main_menu: {e}")
+            try:
+                await query.message.reply_text("Произошла ошибка. Попробуйте еще раз.")
+            except Exception as reply_error:
+                logger.error(f"Could not send error reply: {reply_error}")
     
     async def handle_web_app_data(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка данных от Mini App"""
@@ -373,8 +495,7 @@ class CatalystBot:
     def run(self):
         """Запуск бота"""
         try:
-            # Очищаем webhook перед запуском
-            self.application.bot.delete_webhook()
+            # Запускаем бота напрямую - webhook будет очищен автоматически
             self.application.run_polling(allowed_updates=Update.ALL_TYPES)
         except Exception as e:
             logger.error(f"Error starting bot: {e}")

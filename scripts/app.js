@@ -18,6 +18,9 @@ class OSNOVAMiniApp {
         this.tg.expand();
         this.tg.MainButton.hide();
         
+        // Скрываем стандартный заголовок Telegram Web App
+        this.hideTelegramHeader();
+        
         // Получаем данные пользователя
         this.currentUser = {
             id: this.tg.initDataUnsafe?.user?.id || 'unknown',
@@ -37,15 +40,80 @@ class OSNOVAMiniApp {
         if (this.isAdmin) {
             this.showAdminPanelButton();
         }
+        
+        // Периодически проверяем и скрываем верхнюю часть
+        setInterval(() => {
+            this.hideTelegramHeader();
+        }, 1000);
     }
     
     initUI() {
-        // Добавляем приветственное сообщение
-        this.addMessage({
-            text: `Добро пожаловать в ОСНОВА! 👋\n\nЗадайте любой вопрос о закрытом канале, и мы ответим вам в ближайшее время.`,
-            type: 'admin',
-            timestamp: new Date()
-        });
+        // Инициализация интерфейса без приветственного сообщения
+    }
+    
+    hideTelegramHeader() {
+        // Скрываем стандартный заголовок Telegram Web App
+        setTimeout(() => {
+            // Скрываем все элементы верхней панели
+            const elementsToHide = [
+                '.tgme_widget_message',
+                '.tgme_widget_message_bubble',
+                '.tgme_widget_message_wrap',
+                '.tgme_widget_message_bubble_wrap',
+                '.tgme_widget_message_text',
+                '[data-js="widget-message"]',
+                '.widget-message',
+                '.tgme_widget_message_author',
+                '.tgme_widget_message_author_name',
+                '.tgme_widget_message_author_username',
+                '.tgme_widget_message_author_photo',
+                '.tgme_widget_message_author_photo_wrap',
+                '.tgme_widget_message_author_photo_img',
+                '.tgme_widget_message_author_photo_placeholder'
+            ];
+            
+            elementsToHide.forEach(selector => {
+                const elements = document.querySelectorAll(selector);
+                elements.forEach(el => {
+                    el.style.display = 'none';
+                    el.style.visibility = 'hidden';
+                    el.style.height = '0';
+                    el.style.overflow = 'hidden';
+                    el.style.margin = '0';
+                    el.style.padding = '0';
+                });
+            });
+            
+            // Также скрываем любые элементы с текстом "OSNOVA" или "мини-приложение"
+            const allElements = document.querySelectorAll('*');
+            allElements.forEach(el => {
+                if (el.textContent && (
+                    el.textContent.includes('OSNOVA') || 
+                    el.textContent.includes('мини-приложение') ||
+                    el.textContent.includes('ОСНОВА: доступ к системе') ||
+                    el.textContent.includes('Доступ к закрытому каналу') ||
+                    el.textContent.includes('SNOVA')
+                )) {
+                    el.style.display = 'none';
+                    el.style.visibility = 'hidden';
+                    el.style.height = '0';
+                    el.style.overflow = 'hidden';
+                }
+            });
+            
+            // Скрываем все элементы с изображениями логотипов
+            const images = document.querySelectorAll('img');
+            images.forEach(img => {
+                if (img.src && (
+                    img.src.includes('logo') || 
+                    img.src.includes('avatar') ||
+                    img.alt && img.alt.includes('OSNOVA')
+                )) {
+                    img.style.display = 'none';
+                    img.style.visibility = 'hidden';
+                }
+            });
+        }, 100);
     }
     
     showAdminPanelButton() {
@@ -127,7 +195,15 @@ class OSNOVAMiniApp {
         const messageElement = document.createElement('div');
         
         messageElement.className = `message ${message.type}`;
+        
+        let senderName = '';
+        if (message.type === 'admin') {
+            // Для сообщений администратора показываем "Администратор ✓"
+            senderName = '<div class="message-sender">Администратор <span class="verified-badge-small">✓</span></div>';
+        }
+        
         messageElement.innerHTML = `
+            ${senderName}
             <div class="message-text">${this.escapeHtml(message.text)}</div>
             <div class="message-time">${this.formatTime(message.timestamp)}</div>
         `;
@@ -251,8 +327,7 @@ ${data.question}
         this.loadUserMessages();
         
         // Обновляем заголовок
-        document.querySelector('.header h1').textContent = 'ОСНОВА: доступ к системе';
-        document.querySelector('.subtitle').textContent = 'Доступ к закрытому каналу с техникой OSNOVA';
+        document.querySelector('.chat-title').textContent = 'Поддержка канала ФОРМУЛА';
     }
     
     showUserChat(userId) {
@@ -266,8 +341,7 @@ ${data.question}
         
         // Обновляем заголовок с именем пользователя
         const userName = this.selectedUserData.user.first_name || this.selectedUserData.user.username || 'Пользователь';
-        document.querySelector('.header h1').textContent = `💬 Чат с ${userName}`;
-        document.querySelector('.subtitle').textContent = `ID: ${userId} | @${this.selectedUserData.user.username || 'скрыт'}`;
+        document.querySelector('.chat-title').textContent = `💬 Чат с ${userName}`;
         
         // Очищаем сообщения и загружаем сообщения выбранного пользователя
         const messagesContainer = document.getElementById('messages');
@@ -446,7 +520,15 @@ ${message}
         const messageElement = document.createElement('div');
         
         messageElement.className = `message ${message.type}`;
+        
+        let senderName = '';
+        if (message.type === 'admin') {
+            // Для сообщений администратора показываем "Администратор ✓"
+            senderName = '<div class="message-sender">Администратор <span class="verified-badge-small">✓</span></div>';
+        }
+        
         messageElement.innerHTML = `
+            ${senderName}
             <div class="message-text">${this.escapeHtml(message.text)}</div>
             <div class="file-attachment">
                 <a href="${message.attachment.url}" target="_blank" download="${message.attachment.name}">
@@ -516,5 +598,30 @@ ${message}
 
 // Инициализация приложения
 document.addEventListener('DOMContentLoaded', () => {
+    // Сразу скрываем верхнюю часть
+    const hideHeader = () => {
+        const elements = document.querySelectorAll('*');
+        elements.forEach(el => {
+            if (el.textContent && (
+                el.textContent.includes('OSNOVA') || 
+                el.textContent.includes('мини-приложение') ||
+                el.textContent.includes('ОСНОВА: доступ к системе') ||
+                el.textContent.includes('Доступ к закрытому каналу') ||
+                el.textContent.includes('SNOVA')
+            )) {
+                el.style.display = 'none';
+                el.style.visibility = 'hidden';
+                el.style.height = '0';
+                el.style.overflow = 'hidden';
+            }
+        });
+    };
+    
+    // Выполняем сразу и через небольшие интервалы
+    hideHeader();
+    setTimeout(hideHeader, 50);
+    setTimeout(hideHeader, 200);
+    setTimeout(hideHeader, 500);
+    
     new OSNOVAMiniApp();
 });

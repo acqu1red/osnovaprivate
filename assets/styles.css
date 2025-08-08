@@ -12,6 +12,98 @@
     --border-radius-xl: 16px;
 }
 
+/* Скрываем стандартный заголовок Telegram Web App */
+.tgme_widget_message_bubble {
+    display: none !important;
+}
+
+/* Скрываем верхнюю панель Telegram Web App */
+.tgme_widget_message_wrap {
+    display: none !important;
+}
+
+/* Скрываем все элементы верхней панели */
+.tgme_widget_message {
+    display: none !important;
+}
+
+/* Дополнительные стили для скрытия верхней части */
+.tgme_widget_message_bubble_wrap {
+    display: none !important;
+}
+
+/* Скрываем заголовок мини-приложения */
+.tgme_widget_message_text {
+    display: none !important;
+}
+
+/* Дополнительные стили для скрытия верхней части Telegram Web App */
+.tgme_widget_message,
+.tgme_widget_message_bubble,
+.tgme_widget_message_wrap,
+.tgme_widget_message_bubble_wrap,
+.tgme_widget_message_text,
+[data-js="widget-message"],
+.widget-message,
+.tgme_widget_message_author,
+.tgme_widget_message_author_name,
+.tgme_widget_message_author_username {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    overflow: hidden !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+/* Скрываем любые элементы с текстом OSNOVA или мини-приложение */
+*:contains("OSNOVA"),
+*:contains("мини-приложение"),
+*:contains("ОСНОВА: доступ к системе"),
+*:contains("Доступ к закрытому каналу") {
+    display: none !important;
+    visibility: hidden !important;
+}
+
+/* Скрываем все возможные элементы верхней панели Telegram */
+.tgme_widget_message_author_photo,
+.tgme_widget_message_author_photo_wrap,
+.tgme_widget_message_author_photo_img,
+.tgme_widget_message_author_photo_placeholder,
+.tgme_widget_message_author_photo_placeholder_wrap,
+.tgme_widget_message_author_photo_placeholder_img,
+.tgme_widget_message_author_photo_placeholder_text {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    overflow: hidden !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+/* Скрываем все изображения логотипов */
+img[src*="logo"],
+img[src*="avatar"],
+img[alt*="OSNOVA"] {
+    display: none !important;
+    visibility: hidden !important;
+}
+
+/* Скрываем все элементы с текстом SNOVA */
+*:contains("SNOVA") {
+    display: none !important;
+    visibility: hidden !important;
+}
+
+/* Скрываем все элементы верхней панели по атрибутам */
+[data-js*="widget"],
+[data-js*="message"],
+[class*="tgme_widget"],
+[class*="widget-message"] {
+    display: none !important;
+    visibility: hidden !important;
+}
+
 * {
     margin: 0;
     padding: 0;
@@ -26,6 +118,15 @@ body {
     overflow-x: hidden;
     line-height: 1.6;
     font-weight: 400;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+/* Убираем отступы сверху */
+html {
+    scroll-behavior: smooth;
+    margin: 0 !important;
+    padding: 0 !important;
 }
 
 html {
@@ -34,18 +135,20 @@ html {
 
 .container {
     max-width: 100%;
-    margin: 0 auto;
-    padding: 20px;
+    margin: 0 !important;
+    padding: 10px;
     min-height: 100vh;
     display: flex;
     flex-direction: column;
+    position: relative;
+    top: 0;
 }
 
 /* Header */
 .header {
     text-align: center;
-    margin-bottom: 30px;
-    padding: 30px 20px;
+    margin-bottom: 20px;
+    padding: 15px 20px;
     background: var(--bg-primary);
     border-radius: var(--border-radius-xl);
     border: 1px solid var(--border-dark);
@@ -53,38 +156,32 @@ html {
     transition: var(--transition-smooth);
 }
 
-.header:hover {
-    box-shadow: var(--shadow-medium);
-    transform: translateY(-2px);
+.chat-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
 }
 
-.logo {
-    width: 80px;
-    height: 80px;
-    margin-bottom: 20px;
-    border-radius: 50%;
-    border: 2px solid var(--border-dark);
-    transition: var(--transition-smooth);
-}
-
-.logo:hover {
-    transform: scale(1.05);
-    box-shadow: var(--shadow-medium);
-    border-color: var(--accent-light);
-}
-
-.header h1 {
-    font-size: 28px;
+.chat-title {
+    font-size: 18px;
     color: var(--text-primary);
-    margin-bottom: 10px;
     font-weight: 600;
     letter-spacing: -0.5px;
 }
 
-.subtitle {
-    color: var(--text-secondary);
+.verified-badge {
+    color: #00ff00;
     font-size: 16px;
-    font-weight: 400;
+    font-weight: bold;
+    background: rgba(0, 255, 0, 0.1);
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #00ff00;
 }
 
 /* Main Content */
@@ -160,6 +257,20 @@ html {
     margin-right: auto;
     border-bottom-left-radius: 8px;
     border-color: var(--border-dark);
+}
+
+.message-sender {
+    font-size: 12px;
+    color: var(--accent-light);
+    margin-bottom: 4px;
+    font-weight: 500;
+}
+
+.verified-badge-small {
+    color: #00ff00;
+    font-size: 12px;
+    font-weight: bold;
+    margin-left: 4px;
 }
 
 .message-time {
