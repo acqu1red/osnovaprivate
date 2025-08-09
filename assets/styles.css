@@ -281,6 +281,26 @@ html {
     color: var(--text-secondary);
 }
 
+.message-meta {
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.message-status svg {
+    width: 18px;
+    height: 18px;
+    vertical-align: middle;
+}
+
+.checks-gray path {
+    stroke: #9aa0a6;
+}
+.checks-blue path {
+    stroke: #42a5f5;
+}
+
 /* Input Area */
 .input-area {
     padding: 20px;

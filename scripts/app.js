@@ -91,6 +91,17 @@ class OSNOVAMiniApp {
     
     initUI() {
         // Инициализация интерфейса без приветственного сообщения
+        // Пытаемся показать аватар пользователя в шапке, если Telegram его передал
+        try {
+            const avatar = document.getElementById('chat-avatar');
+            const photoUrl = this.tg.initDataUnsafe?.user?.photo_url;
+            if (avatar && photoUrl) {
+                avatar.src = photoUrl;
+                avatar.style.display = 'block';
+            }
+        } catch (e) {
+            // ignore
+        }
     }
 
     bootstrapReplyContextFromURL() {
@@ -257,7 +268,8 @@ class OSNOVAMiniApp {
             type: 'user',
             timestamp: new Date(),
             userId: this.currentUser.id,
-            username: this.currentUser.username
+            username: this.currentUser.username,
+            status: 'pending'
         };
         
         // Добавляем в интерфейс
@@ -290,10 +302,14 @@ class OSNOVAMiniApp {
             senderName = '<div class="message-sender">Администратор <span class="verified-badge-small">✓</span></div>';
         }
         
+        const checks = this.renderChecks(message.status);
         messageElement.innerHTML = `
             ${senderName}
             <div class="message-text">${this.escapeHtml(message.text)}</div>
-            <div class="message-time">${this.formatTime(message.timestamp)}</div>
+            <div class="message-meta">
+                <span class="message-time">${this.formatTime(message.timestamp)}</span>
+                <span class="message-status">${checks}</span>
+            </div>
         `;
         
         messagesContainer.appendChild(messageElement);
@@ -361,7 +377,7 @@ class OSNOVAMiniApp {
                 telegram_id: threadTelegramId
             };
             // Сначала пробуем таблицу messages по вашему SQL
-            let insertRes = await this.sb.from('messages').insert(commonRow);
+            let insertRes = await this.sb.from('messages').insert(commonRow).select('id,created_at');
             if (insertRes.error) {
                 // Если колонок нет, пробуем без telegram_id
                 if (String(insertRes.error.message || '').includes('telegram_id')) {
@@ -387,6 +403,8 @@ class OSNOVAMiniApp {
                     throw insertRes.error;
                 }
             }
+            // Успешная отправка — обновим статус сообщения в UI
+            message.status = 'delivered';
         } catch (e) {
             console.error('saveMessageToCloud error:', e);
         }
@@ -458,7 +476,7 @@ class OSNOVAMiniApp {
                             messages: []
                         };
                     }
-                    const msg = { id: row.id, text: row.message, type: row.author_type || 'user', timestamp: row.created_at, userId, username: row.username || 'скрыт' };
+                    const msg = { id: row.id, text: row.message, type: row.author_type || 'user', timestamp: row.created_at, userId, username: row.username || 'скрыт', status: 'read' };
                     this.questions[userId].messages.push(msg);
                     if (this.currentView === 'user-chat' && this.selectedUserId === userId) this.addMessage(msg);
                     if (this.currentView === 'admin-panel') this.loadUsersList();
@@ -809,6 +827,7 @@ ${message}
             senderName = '<div class="message-sender">Администратор <span class="verified-badge-small">✓</span></div>';
         }
         
+        const checks = this.renderChecks(message.status);
         messageElement.innerHTML = `
             ${senderName}
             <div class="message-text">${this.escapeHtml(message.text)}</div>
@@ -817,7 +836,10 @@ ${message}
                     📎 ${message.attachment.name} (${this.formatFileSize(message.attachment.size)})
                 </a>
             </div>
-            <div class="message-time">${this.formatTime(message.timestamp)}</div>
+            <div class="message-meta">
+                <span class="message-time">${this.formatTime(message.timestamp)}</span>
+                <span class="message-status">${checks}</span>
+            </div>
         `;
         
         messagesContainer.appendChild(messageElement);
@@ -849,6 +871,18 @@ ${message}
             hour: '2-digit',
             minute: '2-digit'
         });
+    }
+
+    renderChecks(status) {
+        // pending: одна серая галочка; delivered: две серые; read: две синие
+        if (status === 'pending') {
+            return `<svg class="checks-gray" viewBox="0 0 24 24" fill="none"><path d="M6 12l3 3 7-7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+        }
+        if (status === 'delivered') {
+            return `<svg class="checks-gray" viewBox="0 0 24 24" fill="none"><path d="M5 13l3 3 7-7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M11 14l3 3 7-7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+        }
+        // read
+        return `<svg class="checks-blue" viewBox="0 0 24 24" fill="none"><path d="M5 13l3 3 7-7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M11 14l3 3 7-7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     }
     
     formatFileSize(bytes) {
