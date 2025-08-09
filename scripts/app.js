@@ -312,9 +312,10 @@ class OSNOVAMiniApp {
     
     saveMessage(message) {
         // Всегда сохраняем переписку в оперативной памяти
+        // Ключ треда всегда Telegram ID пользователя
         const ownerId = this.isAdmin
             ? String(message.userId)
-            : String(this.sbSession?.user?.id || this.currentUser.id);
+            : String(this.currentUser.id);
         if (!this.questions[ownerId]) {
             const threadUsername = this.isAdmin
                 ? (this.selectedUserData?.user?.username || (message.type === 'user' ? message.username : '') || 'скрыт')
