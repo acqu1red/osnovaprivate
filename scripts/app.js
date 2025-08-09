@@ -401,13 +401,15 @@ class OSNOVAMiniApp {
             let res = await this.sb
                 .from('messages')
                 .select('id,user_id,username,message,author_type,created_at,telegram_id')
-                .order('id', { ascending: true });
+                .order('created_at', { ascending: true })
+                .limit(1000);
             if (res.error) {
                 fromMessages = false;
                 const res2 = await this.sb
                     .from('support_messages')
                     .select('id,user_id,username,author_type,text,timestamp')
-                    .order('id', { ascending: true });
+                    .order('timestamp', { ascending: true })
+                    .limit(1000);
                 data = res2.data;
                 error = res2.error;
             } else {
@@ -508,7 +510,8 @@ class OSNOVAMiniApp {
                 .from('messages')
                 .select('id,username,message,author_type,created_at,telegram_id')
                 .eq('telegram_id', myTelegramId)
-                .order('id', { ascending: true });
+                .order('created_at', { ascending: true })
+                .limit(500);
             if (error) throw error;
             this.questions[myTelegramId] = {
                 user: {
