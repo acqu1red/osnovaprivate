@@ -363,20 +363,20 @@ class OSNOVAMiniApp {
             
             // Определяем данные для сохранения
             const threadId = this.isAdmin ? String(message.userId) : String(this.currentUser.id);
-            const senderTelegramId = this.isAdmin ? Number(this.currentUser.id) : Number(this.currentUser.id);
+            const senderTelegramId = Number(this.currentUser.id);
             const senderRole = message.type || (this.isAdmin ? 'admin' : 'user');
-            const senderUsername = this.isAdmin ? (this.currentUser.username || null) : (message.username || this.currentUser.username || null);
+            const senderUsername = this.currentUser.username || null;
             const senderFirstName = this.isAdmin ? 
                 (this.currentUser.first_name || 'Администратор') : 
                 (this.currentUser.first_name || 'Пользователь');
             
-            // Используем новую функцию add_support_message
+            // Используем новую функцию add_support_message с правильным порядком параметров
             const { data, error } = await this.sb.rpc('add_support_message', {
                 p_thread_id: threadId,
                 p_sender_telegram_id: senderTelegramId,
+                p_message_text: message.text,
                 p_sender_username: senderUsername,
                 p_sender_first_name: senderFirstName,
-                p_message_text: message.text,
                 p_message_type: 'text'
             });
             
@@ -478,11 +478,14 @@ class OSNOVAMiniApp {
 
     processThreadMessages(threadId, messages, threadInfo = null) {
         if (!this.questions[threadId]) {
+            // Если у нас есть сообщения, попробуем получить данные пользователя из первого сообщения пользователя
+            const userMessage = (messages || []).find(msg => msg.sender_role === 'user');
+            
             this.questions[threadId] = {
                 user: {
                     id: threadId,
-                    username: threadInfo?.username || 'скрыт',
-                    first_name: threadInfo?.first_name || 'Пользователь'
+                    username: threadInfo?.username || userMessage?.sender_username || 'скрыт',
+                    first_name: threadInfo?.first_name || userMessage?.sender_first_name || 'Пользователь'
                 },
                 messages: []
             };
@@ -545,6 +548,15 @@ class OSNOVAMiniApp {
                 username: msg.sender_username || this.currentUser.username || 'скрыт'
             }))
         };
+        
+        // Загружаем сообщения в интерфейс для пользователя
+        if (!this.isAdmin && this.currentView === 'chat') {
+            const messagesContainer = document.getElementById('messages');
+            messagesContainer.innerHTML = '';
+            this.questions[myTelegramId].messages.forEach(message => {
+                this.addMessage(message);
+            });
+        }
     }
 
     subscribeRealtime() {
@@ -583,6 +595,14 @@ class OSNOVAMiniApp {
             const isMyMessage = Number(messageData.sender_telegram_id) === Number(this.currentUser.id);
             if (isMyMessage) return;
 
+            console.log('Processing realtime message:', {
+                threadId,
+                senderRole: messageData.sender_role,
+                isAdmin: this.isAdmin,
+                currentUserId: this.currentUser.id,
+                currentView: this.currentView
+            });
+
             // Инициализируем тред если его нет
             if (!this.questions[threadId]) {
                 this.questions[threadId] = {
@@ -598,7 +618,7 @@ class OSNOVAMiniApp {
             // Добавляем сообщение в локальную структуру
             this.questions[threadId].messages.push(msg);
 
-            // Отображаем сообщение в UI если нужно
+            // Отображаем сообщение в UI
             if (this.isAdmin) {
                 // Для админа: показываем если открыт чат с этим пользователем
                 if (this.currentView === 'user-chat' && this.selectedUserId === threadId) {
@@ -609,8 +629,10 @@ class OSNOVAMiniApp {
                     this.loadUsersList();
                 }
             } else {
-                // Для пользователя: показываем если это сообщение в его треде
-                if (threadId === String(this.currentUser.id) && this.currentView === 'chat') {
+                // Для обычного пользователя: показываем сообщения от админа в его треде
+                const myThreadId = String(this.currentUser.id);
+                if (threadId === myThreadId && this.currentView === 'chat') {
+                    console.log('Adding admin message to user chat');
                     this.addMessage(msg);
                 }
             }
