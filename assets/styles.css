@@ -244,18 +244,18 @@ html {
 }
 
 .message.self {
-    background: rgba(237, 233, 213, 0.12); /* бежевый оттенок для отправителя */
+    background: rgba(237, 233, 213, 0.08);
     color: var(--text-primary);
-    margin-right: auto; /* слева */
-    border-bottom-left-radius: 8px;
+    margin-left: auto;
+    border-bottom-right-radius: 8px;
     border-color: var(--accent-light);
 }
 
 .message.other {
     background: var(--bg-primary);
     color: var(--text-primary);
-    margin-left: auto; /* справа */
-    border-bottom-right-radius: 8px;
+    margin-right: auto;
+    border-bottom-left-radius: 8px;
     border-color: var(--border-dark);
 }
 
@@ -279,26 +279,6 @@ html {
     margin-top: 8px;
     font-weight: 400;
     color: var(--text-secondary);
-}
-
-.message-meta {
-    margin-top: 6px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.message-status svg {
-    width: 18px;
-    height: 18px;
-    vertical-align: middle;
-}
-
-.checks-gray path {
-    stroke: #9aa0a6;
-}
-.checks-blue path {
-    stroke: #42a5f5;
 }
 
 /* Input Area */

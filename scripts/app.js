@@ -91,17 +91,6 @@ class OSNOVAMiniApp {
     
     initUI() {
         // Инициализация интерфейса без приветственного сообщения
-        // Пытаемся показать аватар пользователя в шапке, если Telegram его передал
-        try {
-            const avatar = document.getElementById('chat-avatar');
-            const photoUrl = this.tg.initDataUnsafe?.user?.photo_url;
-            if (avatar && photoUrl) {
-                avatar.src = photoUrl;
-                avatar.style.display = 'block';
-            }
-        } catch (e) {
-            // ignore
-        }
     }
 
     bootstrapReplyContextFromURL() {
@@ -268,8 +257,7 @@ class OSNOVAMiniApp {
             type: 'user',
             timestamp: new Date(),
             userId: this.currentUser.id,
-            username: this.currentUser.username,
-            status: 'pending'
+            username: this.currentUser.username
         };
         
         // Добавляем в интерфейс
@@ -291,8 +279,7 @@ class OSNOVAMiniApp {
     addMessage(message) {
         const messagesContainer = document.getElementById('messages');
         const messageElement = document.createElement('div');
-        // Отправитель = тот, кто пишет сейчас (его сообщение слева и бежевое)
-        const isSelf = (this.isAdmin && message.type === 'admin') || (!this.isAdmin && message.type === 'user');
+        const isSelf = this.isAdmin ? (message.type === 'admin') : (message.type === 'user');
         const sideClass = isSelf ? 'self' : 'other';
         messageElement.className = `message ${sideClass}`;
         
@@ -302,14 +289,10 @@ class OSNOVAMiniApp {
             senderName = '<div class="message-sender">Администратор <span class="verified-badge-small">✓</span></div>';
         }
         
-        const checks = this.renderChecks(message.status);
         messageElement.innerHTML = `
             ${senderName}
             <div class="message-text">${this.escapeHtml(message.text)}</div>
-            <div class="message-meta">
-                <span class="message-time">${this.formatTime(message.timestamp)}</span>
-                <span class="message-status">${checks}</span>
-            </div>
+            <div class="message-time">${this.formatTime(message.timestamp)}</div>
         `;
         
         messagesContainer.appendChild(messageElement);
@@ -377,7 +360,7 @@ class OSNOVAMiniApp {
                 telegram_id: threadTelegramId
             };
             // Сначала пробуем таблицу messages по вашему SQL
-            let insertRes = await this.sb.from('messages').insert(commonRow).select('id,created_at');
+            let insertRes = await this.sb.from('messages').insert(commonRow);
             if (insertRes.error) {
                 // Если колонок нет, пробуем без telegram_id
                 if (String(insertRes.error.message || '').includes('telegram_id')) {
@@ -403,8 +386,6 @@ class OSNOVAMiniApp {
                     throw insertRes.error;
                 }
             }
-            // Успешная отправка — обновим статус сообщения в UI
-            message.status = 'delivered';
         } catch (e) {
             console.error('saveMessageToCloud error:', e);
         }
@@ -476,7 +457,7 @@ class OSNOVAMiniApp {
                             messages: []
                         };
                     }
-                    const msg = { id: row.id, text: row.message, type: row.author_type || 'user', timestamp: row.created_at, userId, username: row.username || 'скрыт', status: 'read' };
+                    const msg = { id: row.id, text: row.message, type: row.author_type || 'user', timestamp: row.created_at, userId, username: row.username || 'скрыт' };
                     this.questions[userId].messages.push(msg);
                     if (this.currentView === 'user-chat' && this.selectedUserId === userId) this.addMessage(msg);
                     if (this.currentView === 'admin-panel') this.loadUsersList();
@@ -520,28 +501,27 @@ class OSNOVAMiniApp {
 
     async fetchMessagesForMe() {
         if (!this.sb) return;
-        const me = this.sbSession?.user?.id;
-        if (!me) return;
+        const myTelegramId = String(this.currentUser.id);
         try {
+            // Читаем диалог по telegram_id — включает и мои сообщения, и ответы админов
             const { data, error } = await this.sb
                 .from('messages')
-                .select('id,user_id,username,message,created_at')
-                .eq('user_id', me)
+                .select('id,username,message,author_type,created_at,telegram_id')
+                .eq('telegram_id', myTelegramId)
                 .order('id', { ascending: true });
             if (error) throw error;
-            const userKey = String(me);
-            this.questions[userKey] = {
+            this.questions[myTelegramId] = {
                 user: {
-                    id: userKey,
+                    id: myTelegramId,
                     username: this.currentUser.username || 'скрыт',
                     first_name: this.currentUser.first_name || 'Пользователь'
                 },
                 messages: data.map(r => ({
                     id: r.id,
                     text: r.message,
-                    type: 'user',
+                    type: (r.author_type || 'user'),
                     timestamp: r.created_at,
-                    userId: userKey,
+                    userId: myTelegramId,
                     username: r.username || this.currentUser.username || 'скрыт'
                 }))
             };
@@ -694,6 +674,8 @@ ${data.question}
         
         // Отправляем уведомление пользователю через бота
         this.sendUserNotification(reply);
+        // Сохраняем ответ админа в Supabase в тред пользователя
+        this.saveMessageToCloud(reply);
         
         // Очищаем поле ввода
         input.value = '';
@@ -817,7 +799,7 @@ ${message}
     addMessageWithAttachment(message) {
         const messagesContainer = document.getElementById('messages');
         const messageElement = document.createElement('div');
-        const isSelf = (this.isAdmin && message.type === 'admin') || (!this.isAdmin && message.type === 'user');
+        const isSelf = this.isAdmin ? (message.type === 'admin') : (message.type === 'user');
         const sideClass = isSelf ? 'self' : 'other';
         messageElement.className = `message ${sideClass}`;
         
@@ -827,7 +809,6 @@ ${message}
             senderName = '<div class="message-sender">Администратор <span class="verified-badge-small">✓</span></div>';
         }
         
-        const checks = this.renderChecks(message.status);
         messageElement.innerHTML = `
             ${senderName}
             <div class="message-text">${this.escapeHtml(message.text)}</div>
@@ -836,10 +817,7 @@ ${message}
                     📎 ${message.attachment.name} (${this.formatFileSize(message.attachment.size)})
                 </a>
             </div>
-            <div class="message-meta">
-                <span class="message-time">${this.formatTime(message.timestamp)}</span>
-                <span class="message-status">${checks}</span>
-            </div>
+            <div class="message-time">${this.formatTime(message.timestamp)}</div>
         `;
         
         messagesContainer.appendChild(messageElement);
@@ -872,18 +850,6 @@ ${message}
             minute: '2-digit'
         });
     }
-
-    renderChecks(status) {
-        // pending: одна серая галочка; delivered: две серые; read: две синие
-        if (status === 'pending') {
-            return `<svg class="checks-gray" viewBox="0 0 24 24" fill="none"><path d="M6 12l3 3 7-7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-        }
-        if (status === 'delivered') {
-            return `<svg class="checks-gray" viewBox="0 0 24 24" fill="none"><path d="M5 13l3 3 7-7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M11 14l3 3 7-7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-        }
-        // read
-        return `<svg class="checks-blue" viewBox="0 0 24 24" fill="none"><path d="M5 13l3 3 7-7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M11 14l3 3 7-7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-    }
     
     formatFileSize(bytes) {
         if (bytes === 0) return '0 Bytes';
@@ -895,7 +861,7 @@ ${message}
     
     loadQuestions() {
         // Больше не используем localStorage — данные приходят из Supabase
-        return {};
+            return {};
     }
     
     saveQuestions() {

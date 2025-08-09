@@ -630,31 +630,6 @@ class CatalystBot:
             
         except Exception as e:
             logger.error(f"Error sending reply to user: {e}")
-            
-        # Дублируем уведомление админам, что отправлен ответ (и кнопка для открытия диалога)
-        try:
-            user_id = data['userId']
-            admin_name = data.get('adminName', 'Администратор')
-            from urllib.parse import quote
-            params = (
-                f"userId={quote(str(user_id))}&"
-                f"admin=1"
-            )
-            url = f"{MINI_APP_URL}?{params}"
-            kb = InlineKeyboardMarkup([[InlineKeyboardButton("💬 Открыть диалог", web_app=WebAppInfo(url=url))]])
-            for admin_id in self.admin_ids:
-                if admin_id == data.get('adminId'):
-                    continue
-                try:
-                    await context.bot.send_message(
-                        chat_id=admin_id,
-                        text=f"✅ {admin_name} ответил пользователю {user_id}",
-                        reply_markup=kb
-                    )
-                except Exception:
-                    pass
-        except Exception:
-            pass
     
     def run(self):
         """Запуск бота"""
