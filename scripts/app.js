@@ -438,6 +438,32 @@ class OSNOVAMiniApp {
                     : { id: row.id, text: row.text, type: row.author_type, timestamp: row.timestamp, userId, username: row.username || 'скрыт' };
                 this.questions[userId].messages.push(msg);
             });
+            // Нормализация ключей: если знаем telegram_id для username — переносим тред к telegram_id
+            const usernameToTid = {};
+            Object.values(this.questions).forEach(thread => {
+                const anyWithTid = thread.messages.find(m => /\d+/.test(m.userId));
+                if (anyWithTid && thread.user.username) {
+                    usernameToTid[thread.user.username] = anyWithTid.userId;
+                }
+            });
+            Object.keys(this.questions).forEach(key => {
+                if (!/^[0-9]+$/.test(key)) {
+                    const tid = usernameToTid[this.questions[key].user.username];
+                    if (tid) {
+                        if (!this.questions[tid]) {
+                            this.questions[tid] = {
+                                user: { ...this.questions[key].user, id: tid },
+                                messages: []
+                            };
+                        }
+                        this.questions[key].messages.forEach(m => {
+                            const moved = { ...m, userId: tid };
+                            this.questions[tid].messages.push(moved);
+                        });
+                        delete this.questions[key];
+                    }
+                }
+            });
             if (this.currentView === 'admin-panel') this.loadUsersList();
         } catch (e) {
             console.error('fetchAllMessagesFromCloud error:', e);

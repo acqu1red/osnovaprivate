@@ -555,7 +555,7 @@ class CatalystBot:
             logger.error(f"Error in send_admin_notifications: {e}")
     
     async def notify_admins_direct(self, context: ContextTypes.DEFAULT_TYPE, data):
-        """Личные уведомления администраторам о новом сообщении пользователя + кнопка Ответить"""
+        #Личные уведомления администраторам о новом сообщении пользователя + кнопка Ответить
         try:
             user_info = data['user']
             username = user_info.get('username', 'скрыт')
@@ -627,6 +627,7 @@ class CatalystBot:
                 reply_markup=reply_markup,
                 parse_mode='Markdown'
             )
+            # Продублируем в Supabase через HTTP RPC (опционально будущая доработка)
             
         except Exception as e:
             logger.error(f"Error sending reply to user: {e}")
