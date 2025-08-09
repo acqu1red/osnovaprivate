@@ -684,6 +684,11 @@ ${data.question}
         const text = input.value.trim();
         
         if (!text || !this.selectedUserId) return;
+        // Безопасность: отвечаем только тредам с числовым telegram_id
+        if (!/^\d+$/.test(String(this.selectedUserId))) {
+            this.showStatus('Невозможно отправить: неизвестен Telegram ID пользователя. Откройте диалог из уведомления "Ответить".', 'error');
+            return;
+        }
         
         // Создаем ответ администратора
         const reply = {
@@ -691,7 +696,7 @@ ${data.question}
             text: text,
             type: 'admin',
             timestamp: new Date(),
-            userId: this.selectedUserId,
+            userId: String(this.selectedUserId),
             adminId: this.currentUser.id
         };
         

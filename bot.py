@@ -444,16 +444,31 @@ class CatalystBot:
                 logger.info(f"Received web_app_data type={data.get('type')} from user={update.effective_user.id if update.effective_user else 'unknown'}")
                 
                 if data.get('type') == 'new_question':
-                    # Отправляем вопрос в канал
+                    # Единая точка уведомлений админам (личка + канал)
                     await self.send_question_to_channel(context, data['data'])
-                    # Отправляем уведомления администраторам
                     await self.send_admin_notifications(context, data['data'])
-                    # Дополнительно — личные уведомления для админов
                     await self.notify_admins_direct(context, data['data'])
                     
                 elif data.get('type') == 'admin_reply':
                     # Отправляем ответ пользователю
                     await self.send_reply_to_user(context, data['data'])
+                    # И уведомляем второго админа (если ответил один), добавляя кнопку для входа в диалог
+                    try:
+                        user_id = data['data']['userId']
+                        admin_id = data['data'].get('adminId')
+                        from urllib.parse import quote
+                        params = f"userId={quote(str(user_id))}&admin=1"
+                        url = f"{MINI_APP_URL}?{params}"
+                        kb = InlineKeyboardMarkup([[InlineKeyboardButton("💬 Открыть диалог", web_app=WebAppInfo(url=url))]])
+                        for aid in self.admin_ids:
+                            if aid == admin_id:
+                                continue
+                            try:
+                                await context.bot.send_message(chat_id=aid, text=f"✅ Админ отправил ответ пользователю {user_id}", reply_markup=kb)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
                 else:
                     logger.warning(f"Unknown web_app_data type: {data.get('type')}")
             else:
