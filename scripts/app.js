@@ -62,13 +62,6 @@ class OSNOVAMiniApp {
         // Инициализируем интерфейс
         this.initUI();
         this.bindEvents();
-        // Скрываем верхнюю галочку для обычных пользователей
-        try {
-            const hdrBadge = document.querySelector('.verified-badge');
-            if (hdrBadge) {
-                hdrBadge.style.display = this.isAdmin ? 'inline-flex' : 'none';
-            }
-        } catch (_) {}
         // Для обычного пользователя: загрузим историю из Supabase
         if (!this.isAdmin && this.sb) {
             await this.fetchMessagesForMe();
@@ -289,56 +282,43 @@ class OSNOVAMiniApp {
         const isSelf = this.isAdmin ? (message.type === 'admin') : (message.type === 'user');
         const sideClass = isSelf ? 'self' : 'other';
         messageElement.className = `message ${sideClass}`;
-
-        let senderLabelHtml = '';
+        
+        let senderName = '';
         if (message.type === 'admin') {
-            senderLabelHtml = '<div class="message-sender">Администратор <span class="verified-badge-small">✓</span></div>';
+            // Для сообщений администратора показываем "Администратор ✔"
+            senderName = '<div class="message-sender">Администратор <span class="verified-badge-small">✔</span></div>';
         } else {
-            const thread = this.questions[String(message.userId)] || this.selectedUserData;
-            const uname = message.username || thread?.user?.username || this.currentUser.username || '';
-            const label = uname ? `@${uname}` : (this.currentUser.first_name || 'Пользователь');
-            senderLabelHtml = `<div class="message-sender">${this.escapeHtml(label)}</div>`;
+            // Для сообщений пользователя показываем его Telegram ник или имя
+            const fallbackFirstName = (this.selectedUserData?.user.first_name) || this.currentUser.first_name || 'Пользователь';
+            const uname = message.username || (this.selectedUserData?.user.username) || this.currentUser.username || '';
+            const label = uname ? `@${uname}` : fallbackFirstName;
+            senderName = `<div class="message-sender">${this.escapeHtml(label)}</div>`;
         }
-
+        
         messageElement.innerHTML = `
-            ${senderLabelHtml}
+            ${senderName}
             <div class="message-text">${this.escapeHtml(message.text)}</div>
             <div class="message-time">${this.formatTime(message.timestamp)}</div>
         `;
-
+        
         messagesContainer.appendChild(messageElement);
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
     
     saveMessage(message) {
         // Всегда сохраняем переписку в оперативной памяти
-        // Ключ треда всегда Telegram ID пользователя
         const ownerId = this.isAdmin
             ? String(message.userId)
-            : String(this.currentUser.id);
+            : String(this.sbSession?.user?.id || this.currentUser.id);
         if (!this.questions[ownerId]) {
-            const threadUsername = this.isAdmin
-                ? (this.selectedUserData?.user?.username || (message.type === 'user' ? message.username : '') || 'скрыт')
-                : (message.username || this.currentUser.username || 'скрыт');
-            const threadFirstName = this.isAdmin
-                ? (this.selectedUserData?.user?.first_name || 'Пользователь')
-                : (this.currentUser.first_name || 'Пользователь');
             this.questions[ownerId] = {
                 user: {
                     id: ownerId,
-                    username: threadUsername,
-                    first_name: threadFirstName
+                    username: message.username || this.currentUser.username,
+                    first_name: this.currentUser.first_name
                 },
                 messages: []
             };
-        } else {
-            // Если прилетело пользовательское сообщение и нет username у треда — обновим его
-            if (message.type === 'user') {
-                const threadUser = this.questions[ownerId].user;
-                if (!threadUser.username && message.username) {
-                    threadUser.username = message.username;
-                }
-            }
         }
         this.questions[ownerId].messages.push(message);
         // Всегда дублируем в облако, если доступно (и для пользователя, и для админа)
@@ -376,6 +356,9 @@ class OSNOVAMiniApp {
             const sessionUserId = this.sbSession?.user?.id || null;
             // Определяем ключ треда по Telegram ID собеседника
             const threadTelegramId = this.isAdmin ? String(message.userId) : String(this.currentUser.id);
+            const senderTelegramId = this.isAdmin ? String(this.currentUser.id) : String(this.currentUser.id);
+            const senderUsername = this.isAdmin ? (this.currentUser.username || null) : (message.username || this.currentUser.username || null);
+            const senderRole = message.type || (this.isAdmin ? 'admin' : 'user');
             // Пытаемся писать в таблицу messages (как в вашем SQL). Если есть support_messages — тоже поддержим.
             const commonRow = {
                 user_id: String(sessionUserId || this.currentUser.id),
@@ -383,13 +366,28 @@ class OSNOVAMiniApp {
                 message: message.text,
                 author_type: message.type || 'user',
                 created_at: new Date(message.timestamp).toISOString(),
-                telegram_id: threadTelegramId
+                telegram_id: threadTelegramId,
+                sender_telegram_id: senderTelegramId,
+                sender_role: senderRole,
+                sender_username: senderUsername
             };
             // Сначала пробуем таблицу messages по вашему SQL
             let insertRes = await this.sb.from('messages').insert(commonRow);
             if (insertRes.error) {
                 // Если колонок нет, пробуем без telegram_id
-                if (String(insertRes.error.message || '').includes('telegram_id')) {
+                const errMsg = String(insertRes.error.message || '');
+                if (errMsg.includes('sender_telegram_id') || errMsg.includes('sender_role') || errMsg.includes('sender_username')) {
+                    const fallbackRow = {
+                        user_id: commonRow.user_id,
+                        username: commonRow.username,
+                        message: commonRow.message,
+                        author_type: commonRow.author_type,
+                        created_at: commonRow.created_at,
+                        telegram_id: commonRow.telegram_id
+                    };
+                    const { error } = await this.sb.from('messages').insert(fallbackRow);
+                    if (error) throw error;
+                } else if (errMsg.includes('telegram_id')) {
                     const { error } = await this.sb.from('messages').insert({
                         user_id: commonRow.user_id,
                         username: commonRow.username,
@@ -398,13 +396,11 @@ class OSNOVAMiniApp {
                         created_at: commonRow.created_at,
                     });
                     if (error) throw error;
-                } else if (String(insertRes.error.message || '').includes('relation') || String(insertRes.error.message || '').includes('does not exist')) {
+                } else if (errMsg.includes('relation') || errMsg.includes('does not exist')) {
                     // Если таблицы messages нет, используем support_messages
                     const { error } = await this.sb.from('support_messages').insert({
-                        // Ключ треда — всегда Telegram ID собеседника
-                        user_id: threadTelegramId,
-                        // Сохраняем username автора сообщения (для user — его, для admin — логин админа не влияет на тред)
-                        username: message.type === 'admin' ? (this.selectedUserData?.user?.username || null) : (this.currentUser.username || null),
+                        user_id: commonRow.user_id,
+                        username: commonRow.username,
                         author_type: commonRow.author_type,
                         text: commonRow.message,
                         timestamp: commonRow.created_at,
@@ -455,22 +451,15 @@ class OSNOVAMiniApp {
                     this.questions[userId] = {
                         user: {
                             id: userId,
-                            username: 'скрыт',
-                            first_name: 'Пользователь'
+                            username: row.username || 'скрыт',
+                            first_name: row.username || 'Пользователь'
                         },
                         messages: []
                     };
                 }
-                // Обновляем данные треда username только по пользовательским сообщениям
-                if ((row.author_type || 'user') !== 'admin') {
-                    if (row.username) {
-                        this.questions[userId].user.username = row.username;
-                        this.questions[userId].user.first_name = row.username || 'Пользователь';
-                    }
-                }
                 const msg = fromMessages
-                    ? { id: row.id, text: row.message, type: row.author_type || 'user', timestamp: row.created_at, userId, username: row.username || '' }
-                    : { id: row.id, text: row.text, type: row.author_type, timestamp: row.timestamp, userId, username: row.username || '' };
+                    ? { id: row.id, text: row.message, type: row.author_type || 'user', timestamp: row.created_at, userId, username: row.username || 'скрыт' }
+                    : { id: row.id, text: row.text, type: row.author_type, timestamp: row.timestamp, userId, username: row.username || 'скрыт' };
                 this.questions[userId].messages.push(msg);
             });
             // Нормализация ключей: если знаем telegram_id для username — переносим тред к telegram_id
@@ -516,22 +505,13 @@ class OSNOVAMiniApp {
                     const userId = String(chatKey);
                     if (!this.questions[userId]) {
                         this.questions[userId] = {
-                            user: { id: userId, username: 'скрыт', first_name: 'Пользователь' },
+                            user: { id: userId, username: row.username || 'скрыт', first_name: row.username || 'Пользователь' },
                             messages: []
                         };
                     }
-                    // Обновляем username треда только если это пользовательское сообщение
-                    if ((row.author_type || 'user') !== 'admin' && row.username) {
-                        this.questions[userId].user.username = row.username;
-                        this.questions[userId].user.first_name = row.username || 'Пользователь';
-                    }
-                    const msg = { id: row.id, text: row.message, type: row.author_type || 'user', timestamp: row.created_at, userId, username: row.username || '' };
+                    const msg = { id: row.id, text: row.message, type: row.author_type || 'user', timestamp: row.created_at, userId, username: row.username || 'скрыт' };
                     this.questions[userId].messages.push(msg);
                     if (this.currentView === 'user-chat' && this.selectedUserId === userId) this.addMessage(msg);
-                    // Показываем новые сообщения пользователю сразу в его обычном чате
-                    if (!this.isAdmin && this.currentView === 'chat' && userId === String(this.currentUser.id)) {
-                        this.addMessage(msg);
-                    }
                     if (this.currentView === 'admin-panel') this.loadUsersList();
                 })
                 .subscribe();
@@ -541,20 +521,13 @@ class OSNOVAMiniApp {
                     const userId = String(row.user_id);
                     if (!this.questions[userId]) {
                         this.questions[userId] = {
-                            user: { id: userId, username: 'скрыт', first_name: 'Пользователь' },
+                            user: { id: userId, username: row.username || 'скрыт', first_name: row.username || 'Пользователь' },
                             messages: []
                         };
                     }
-                    if ((row.author_type || 'user') !== 'admin' && row.username) {
-                        this.questions[userId].user.username = row.username;
-                        this.questions[userId].user.first_name = row.username || 'Пользователь';
-                    }
-                    const msg = { id: row.id, text: row.text, type: row.author_type, timestamp: row.timestamp, userId, username: row.username || '' };
+                    const msg = { id: row.id, text: row.text, type: row.author_type, timestamp: row.timestamp, userId, username: row.username || 'скрыт' };
                     this.questions[userId].messages.push(msg);
                     if (this.currentView === 'user-chat' && this.selectedUserId === userId) this.addMessage(msg);
-                    if (!this.isAdmin && this.currentView === 'chat' && userId === String(this.currentUser.id)) {
-                        this.addMessage(msg);
-                    }
                     if (this.currentView === 'admin-panel') this.loadUsersList();
                 })
                 .subscribe();
@@ -583,49 +556,27 @@ class OSNOVAMiniApp {
         const myTelegramId = String(this.currentUser.id);
         try {
             // Читаем диалог по telegram_id — включает и мои сообщения, и ответы админов
-            let messages = [];
-            const res = await this.sb
+            const { data, error } = await this.sb
                 .from('messages')
                 .select('id,username,message,author_type,created_at,telegram_id')
                 .eq('telegram_id', myTelegramId)
                 .order('created_at', { ascending: true })
                 .limit(500);
-            if (!res.error) {
-                messages = (res.data || []).map(r => ({
-                    id: r.id,
-                    text: r.message,
-                    type: (r.author_type || 'user'),
-                    timestamp: r.created_at,
-                    userId: myTelegramId,
-                    username: r.username || ''
-                }));
-            } else if (String(res.error.message || '').includes('relation') || String(res.error.message || '').includes('does not exist')) {
-                // Fallback на support_messages (если таблицы messages нет)
-                const res2 = await this.sb
-                    .from('support_messages')
-                    .select('id,user_id,username,author_type,text,timestamp')
-                    .eq('user_id', myTelegramId)
-                    .order('timestamp', { ascending: true })
-                    .limit(500);
-                if (res2.error) throw res2.error;
-                messages = (res2.data || []).map(r => ({
-                    id: r.id,
-                    text: r.text,
-                    type: (r.author_type || 'user'),
-                    timestamp: r.timestamp,
-                    userId: myTelegramId,
-                    username: r.username || ''
-                }));
-            } else if (res.error) {
-                throw res.error;
-            }
+            if (error) throw error;
             this.questions[myTelegramId] = {
                 user: {
                     id: myTelegramId,
                     username: this.currentUser.username || 'скрыт',
                     first_name: this.currentUser.first_name || 'Пользователь'
                 },
-                messages
+                messages: data.map(r => ({
+                    id: r.id,
+                    text: r.message,
+                    type: (r.author_type || 'user'),
+                    timestamp: r.created_at,
+                    userId: myTelegramId,
+                    username: r.username || this.currentUser.username || 'скрыт'
+                }))
             };
         } catch (e) {
             console.error('fetchMessagesForMe error:', e);
@@ -708,8 +659,8 @@ ${data.question}
         messagesContainer.innerHTML = '';
         this.loadUserMessages();
         
-        // Обновляем заголовок
-        document.querySelector('.chat-title').textContent = 'Поддержка канала ФОРМУЛА';
+        // Обновляем заголовок: для пользователя показываем "Администратор ✔", для админа — общий заголовок
+        document.querySelector('.chat-title').textContent = this.isAdmin ? 'Поддержка канала ФОРМУЛА' : 'Администратор ✔';
     }
     
     showUserChat(userId) {
@@ -721,9 +672,10 @@ ${data.question}
         document.getElementById('admin-panel').style.display = 'none';
         document.getElementById('chat-container').style.display = 'flex';
         
-        // Обновляем заголовок с именем пользователя
-        const userName = this.selectedUserData.user.first_name || this.selectedUserData.user.username || 'Пользователь';
-        document.querySelector('.chat-title').textContent = `💬 Чат с ${userName}`;
+        // Обновляем заголовок с никнеймом/именем пользователя
+        const uname = this.selectedUserData.user.username;
+        const nameOrNick = uname ? `@${uname}` : (this.selectedUserData.user.first_name || 'Пользователь');
+        document.querySelector('.chat-title').textContent = nameOrNick;
         
         // Очищаем сообщения и загружаем сообщения выбранного пользователя
         const messagesContainer = document.getElementById('messages');
@@ -768,7 +720,8 @@ ${data.question}
             type: 'admin',
             timestamp: new Date(),
             userId: String(this.selectedUserId),
-            adminId: this.currentUser.id
+            adminId: this.currentUser.id,
+            username: this.selectedUserData?.user?.username || ''
         };
         
         // Добавляем в чат
@@ -839,7 +792,9 @@ ${data.question}
         
         // Отправляем через Telegram Web App
         this.tg.sendData(JSON.stringify(notification));
-        // Ничего больше не сохраняем здесь, сохранение уже произошло выше
+        
+        // Локально добавляем запись и для админа (чтобы история ответа отображалась сразу)
+        this.saveMessage(reply);
     }
     
     sendUserMessage(userId, adminName, message) {
@@ -906,18 +861,19 @@ ${message}
         const sideClass = isSelf ? 'self' : 'other';
         messageElement.className = `message ${sideClass}`;
         
-        let senderLabelHtml = '';
+        let senderName = '';
         if (message.type === 'admin') {
-            senderLabelHtml = '<div class="message-sender">Администратор <span class="verified-badge-small">✓</span></div>';
+            // Для сообщений администратора показываем "Администратор ✔"
+            senderName = '<div class="message-sender">Администратор <span class="verified-badge-small">✔</span></div>';
         } else {
-            const thread = this.questions[String(message.userId)] || this.selectedUserData;
-            const uname = message.username || thread?.user?.username || this.currentUser.username || '';
-            const label = uname ? `@${uname}` : (this.currentUser.first_name || 'Пользователь');
-            senderLabelHtml = `<div class="message-sender">${this.escapeHtml(label)}</div>`;
+            const fallbackFirstName = (this.selectedUserData?.user.first_name) || this.currentUser.first_name || 'Пользователь';
+            const uname = message.username || (this.selectedUserData?.user.username) || this.currentUser.username || '';
+            const label = uname ? `@${uname}` : fallbackFirstName;
+            senderName = `<div class="message-sender">${this.escapeHtml(label)}</div>`;
         }
         
         messageElement.innerHTML = `
-            ${senderLabelHtml}
+            ${senderName}
             <div class="message-text">${this.escapeHtml(message.text)}</div>
             <div class="file-attachment">
                 <a href="${message.attachment.url}" target="_blank" download="${message.attachment.name}">
@@ -946,11 +902,11 @@ ${message}
     
     // Утилиты
     getSenderLabel(message) {
-        // Для пользователя: его сообщения — label = @username или first_name; админ — "Администратор"
-        // Для админа: сообщения с type 'admin' — "Администратор", иначе — @username пользователя
-        if (message.type === 'admin') return 'Администратор';
-        const uname = message.username || this.currentUser.username || '';
-        return uname ? `@${uname}` : (this.currentUser.first_name || 'Пользователь');
+        // Для пользователя: его сообщения — label = @username или first_name; админ — "Администратор ✔"
+        // Для админа: сообщения с type 'admin' — "Администратор ✔", иначе — @username пользователя
+        if (message.type === 'admin') return 'Администратор ✔';
+        const uname = message.username || (this.selectedUserData?.user.username) || this.currentUser.username || '';
+        return uname ? `@${uname}` : ((this.selectedUserData?.user.first_name) || this.currentUser.first_name || 'Пользователь');
     }
     escapeHtml(text) {
         const div = document.createElement('div');

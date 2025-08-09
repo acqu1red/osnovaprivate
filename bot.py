@@ -25,26 +25,7 @@ class CatalystBot:
         self.unpaid_users = {}  # Словарь для отслеживания неоплаченных пользователей
         # Администраторы, которым отправляются уведомления о новых вопросах
         self.admin_ids = [8354723250, 7365307696]
-        # Версионирование Mini App для борьбы с кешем в Telegram WebView
-        # Меняйте это значение при деплое, чтобы пробивать кеш. Если None — используется текущий timestamp
-        self.webapp_version = None
         self.setup_handlers()
-
-    def _with_version(self, base_url: str) -> str:
-        try:
-            from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
-            parsed = urlparse(base_url)
-            query = dict(parse_qsl(parsed.query, keep_blank_values=True))
-            from datetime import datetime as _dt
-            version_value = self.webapp_version if self.webapp_version is not None else int(_dt.utcnow().timestamp())
-            query['v'] = str(version_value)
-            new_query = urlencode(query)
-            return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
-        except Exception:
-            sep = '&' if ('?' in base_url) else '?'
-            from datetime import datetime as _dt
-            version_value = self.webapp_version if self.webapp_version is not None else int(_dt.utcnow().timestamp())
-            return f"{base_url}{sep}v={version_value}"
 
     @staticmethod
     def _extract_web_app_data(update: Update):
@@ -108,7 +89,7 @@ class CatalystBot:
                 InlineKeyboardButton("📋 Подробнее о канале", callback_data="channel_info")
             ],
             [
-                InlineKeyboardButton("❓ Задать вопрос", web_app=WebAppInfo(url=self._with_version(MINI_APP_URL)))
+                InlineKeyboardButton("❓ Задать вопрос", web_app=WebAppInfo(url=MINI_APP_URL))
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -314,7 +295,7 @@ class CatalystBot:
                     InlineKeyboardButton("💳 Карта (любая валюта)", callback_data="card_payment")
                 ],
                 [
-                    InlineKeyboardButton("❓ Задать вопрос", web_app=WebAppInfo(url=self._with_version(MINI_APP_URL)))
+                    InlineKeyboardButton("❓ Задать вопрос", web_app=WebAppInfo(url=MINI_APP_URL))
                 ],
                 [
                     InlineKeyboardButton("📄 Договор оферты", callback_data="terms")
@@ -370,7 +351,7 @@ class CatalystBot:
                     InlineKeyboardButton("💳 Оплатить доступ", callback_data="payment_menu")
                 ],
                 [
-                InlineKeyboardButton("❓ Задать вопрос", web_app=WebAppInfo(url=self._with_version(MINI_APP_URL)))
+                    InlineKeyboardButton("❓ Задать вопрос", web_app=WebAppInfo(url=MINI_APP_URL))
                 ],
                 [
                     InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")
@@ -530,7 +511,7 @@ class CatalystBot:
                 f"&username={quote(username)}"
                 f"&question={quote(data.get('question', ''))}"
             )
-            reply_url = self._with_version(f"{MINI_APP_URL}?{query_params}")
+            reply_url = f"{MINI_APP_URL}?{query_params}"
             keyboard = [[InlineKeyboardButton("💬 Ответить", web_app=WebAppInfo(url=reply_url))]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
@@ -570,7 +551,7 @@ class CatalystBot:
                 f"&question={quote(data.get('question', ''))}"
                 f"&admin=1"
             )
-            reply_url = self._with_version(f"{MINI_APP_URL}?{query_params}")
+            reply_url = f"{MINI_APP_URL}?{query_params}"
 
             keyboard = [[InlineKeyboardButton("💬 Ответить", web_app=WebAppInfo(url=reply_url))]]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -612,7 +593,7 @@ class CatalystBot:
                 f"username={quote(username)}&"
                 f"question={quote(data.get('question', ''))}&admin=1"
             )
-            url = self._with_version(f"{MINI_APP_URL}?{params}")
+            url = f"{MINI_APP_URL}?{params}"
             kb = InlineKeyboardMarkup([[InlineKeyboardButton("💬 Ответить", web_app=WebAppInfo(url=url))]])
 
             for admin_id in self.admin_ids:
@@ -630,7 +611,7 @@ class CatalystBot:
             if user_id not in self.admin_ids:
                 await update.effective_message.reply_text("Доступ запрещен")
                 return
-            url = self._with_version(f"{MINI_APP_URL}?admin=1")
+            url = f"{MINI_APP_URL}?admin=1"
             keyboard = [[InlineKeyboardButton("👑 Открыть панель администратора", web_app=WebAppInfo(url=url))]]
             await update.effective_message.reply_text("Откройте панель администратора", reply_markup=InlineKeyboardMarkup(keyboard))
         except Exception as e:
@@ -645,12 +626,12 @@ class CatalystBot:
             admin_id = data.get('adminId')
             # Добавляем галочку для известных администраторов
             display_admin_name = (
-                f"{admin_name} ✓" if admin_id in self.admin_ids else admin_name
+                f"{admin_name} ✔" if admin_id in self.admin_ids else admin_name
             )
             
             keyboard = [
                 [
-                    InlineKeyboardButton("💬 Открыть чат", web_app=WebAppInfo(url=self._with_version(MINI_APP_URL)))
+                    InlineKeyboardButton("💬 Открыть чат", web_app=WebAppInfo(url=MINI_APP_URL))
                 ]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
