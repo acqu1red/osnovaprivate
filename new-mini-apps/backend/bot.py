@@ -1,8 +1,9 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, CallbackContext
+from queue import Queue
 
 # Функция для обработки команды /start
-def start(update: Update, context: CallbackContext) -> None:
+async def start(update: Update, context: CallbackContext) -> None:
     user_first_name = update.effective_user.first_name
     message = (
         f"Доброго времени суток, {user_first_name}.\n\n"
@@ -17,12 +18,12 @@ def start(update: Update, context: CallbackContext) -> None:
     ]
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-    update.message.reply_text(message, reply_markup=reply_markup, parse_mode='Markdown')
+    await update.message.reply_text(message, reply_markup=reply_markup, parse_mode='Markdown')
 
 # Функция для обработки нажатий на инлайн-кнопки
-def button(update: Update, context: CallbackContext) -> None:
+async def button(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
-    query.answer()
+    await query.answer()
 
     if query.data == 'more_info':
         message = (
@@ -46,24 +47,32 @@ def button(update: Update, context: CallbackContext) -> None:
             [InlineKeyboardButton("Назад 🔙", callback_data='back')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        query.edit_message_text(text=message, reply_markup=reply_markup)
+        await query.edit_message_text(text=message, reply_markup=reply_markup)
 
     elif query.data == 'ask_question':
-        # Здесь будет интеграция с miniapps
-        query.edit_message_text(text="Интеграция с miniapps пока не реализована.")
+        # Открытие miniapps по ссылке
+        await query.edit_message_text(text="[Открыть miniapps](https://acqu1red.github.io/osnovaprivate/)", parse_mode='Markdown')
 
     elif query.data == 'back':
-        start(update, context)
+        await start(update, context)
+
+async def handle_message(update: Update, context: CallbackContext) -> None:
+    if context.user_data.get('awaiting_question'):
+        question = update.message.text
+        # Сохранение вопроса в базе данных или отправка администратору
+        await update.message.reply_text("Ваш вопрос получен. Мы свяжемся с вами в ближайшее время.")
+        context.user_data['awaiting_question'] = False
+    else:
+        await update.message.reply_text("Пожалуйста, используйте команду /start для начала.")
 
 # Основная функция для запуска бота
 def main() -> None:
-    updater = Updater("8354723250:AAEWcX6OojEi_fN-RAekppNMVTAsQDU0wvo")
+    application = ApplicationBuilder().token("8354723250:AAEWcX6OojEi_fN-RAekppNMVTAsQDU0wvo").build()
 
-    updater.dispatcher.add_handler(CommandHandler('start', start))
-    updater.dispatcher.add_handler(CallbackQueryHandler(button))
+    application.add_handler(CommandHandler('start', start))
+    application.add_handler(CallbackQueryHandler(button))
 
-    updater.start_polling()
-    updater.idle()
+    application.run_polling()
 
 if __name__ == '__main__':
     main()
