@@ -25,7 +25,22 @@ class CatalystBot:
         self.unpaid_users = {}  # Словарь для отслеживания неоплаченных пользователей
         # Администраторы, которым отправляются уведомления о новых вопросах
         self.admin_ids = [8354723250, 7365307696]
+        # Словарь для кеширования ролей пользователей
+        self.user_roles_cache = {}
         self.setup_handlers()
+
+    def is_admin(self, user_id):
+        """Проверяет, является ли пользователь администратором"""
+        return user_id in self.admin_ids
+    
+    def get_user_role(self, user_id):
+        """Получает роль пользователя (admin/user)"""
+        if user_id in self.user_roles_cache:
+            return self.user_roles_cache[user_id]
+        
+        role = 'admin' if self.is_admin(user_id) else 'user'
+        self.user_roles_cache[user_id] = role
+        return role
 
     @staticmethod
     def _extract_web_app_data(update: Update):
@@ -622,12 +637,10 @@ class CatalystBot:
         try:
             user_id = data['userId']
             message = data['message']
-            admin_name = data.get('adminName', 'Администратор')
             admin_id = data.get('adminId')
-            # Добавляем галочку для известных администраторов
-            display_admin_name = (
-                f"{admin_name} ✔" if admin_id in self.admin_ids else admin_name
-            )
+            
+            # Используем правильное отображение администратора с галочкой
+            display_admin_name = "Администратор ✔"
             
             keyboard = [
                 [
@@ -642,7 +655,8 @@ class CatalystBot:
                 reply_markup=reply_markup,
                 parse_mode='Markdown'
             )
-            # Продублируем в Supabase через HTTP RPC (опционально будущая доработка)
+            
+            logger.info(f"Reply sent to user {user_id} from admin {admin_id}")
             
         except Exception as e:
             logger.error(f"Error sending reply to user: {e}")

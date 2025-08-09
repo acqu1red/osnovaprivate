@@ -62,10 +62,10 @@ class OSNOVAMiniApp {
         // Инициализируем интерфейс
         this.initUI();
         this.bindEvents();
-        // Для обычного пользователя: загрузим историю из Supabase
+        // Для обычного пользователя: загрузим историю из Supabase и отобразим сообщения
         if (!this.isAdmin && this.sb) {
-            await this.fetchMessagesForMe();
-        this.loadUserMessages();
+            await this.fetchUserMessages();
+            this.loadUserMessages();
         }
 
         // Если подключен Supabase — подписываемся и грузим сообщения
@@ -289,10 +289,17 @@ class OSNOVAMiniApp {
             senderName = '<div class="message-sender">Администратор <span class="verified-badge-small">✔</span></div>';
         } else {
             // Для сообщений пользователя показываем его Telegram ник или имя
-            const fallbackFirstName = (this.selectedUserData?.user.first_name) || this.currentUser.first_name || 'Пользователь';
-            const uname = message.username || (this.selectedUserData?.user.username) || this.currentUser.username || '';
-            const label = uname ? `@${uname}` : fallbackFirstName;
-            senderName = `<div class="message-sender">${this.escapeHtml(label)}</div>`;
+            if (this.isAdmin && this.selectedUserData) {
+                // В админ-панели показываем данные выбранного пользователя
+                const uname = this.selectedUserData.user.username;
+                const label = uname ? `@${uname}` : (this.selectedUserData.user.first_name || 'Пользователь');
+                senderName = `<div class="message-sender">${this.escapeHtml(label)}</div>`;
+            } else {
+                // Для обычного пользователя показываем его данные
+                const uname = message.username || this.currentUser.username || '';
+                const label = uname ? `@${uname}` : (this.currentUser.first_name || 'Пользователь');
+                senderName = `<div class="message-sender">${this.escapeHtml(label)}</div>`;
+            }
         }
         
         messageElement.innerHTML = `
@@ -348,68 +355,51 @@ class OSNOVAMiniApp {
         console.log('sendToBot ->', botData);
     }
 
-    // ====== Облачное хранилище (опционально) ======
+    // ====== Облачное хранилище (новая структура) ======
     async saveMessageToCloud(message) {
         if (!this.sb) return;
         try {
             await this.ensureSupabaseSession();
-            const sessionUserId = this.sbSession?.user?.id || null;
-            // Определяем ключ треда по Telegram ID собеседника
-            const threadTelegramId = this.isAdmin ? String(message.userId) : String(this.currentUser.id);
-            const senderTelegramId = this.isAdmin ? String(this.currentUser.id) : String(this.currentUser.id);
-            const senderUsername = this.isAdmin ? (this.currentUser.username || null) : (message.username || this.currentUser.username || null);
+            
+            // Определяем данные для сохранения
+            const threadId = this.isAdmin ? String(message.userId) : String(this.currentUser.id);
+            const senderTelegramId = this.isAdmin ? Number(this.currentUser.id) : Number(this.currentUser.id);
             const senderRole = message.type || (this.isAdmin ? 'admin' : 'user');
-            // Пытаемся писать в таблицу messages (как в вашем SQL). Если есть support_messages — тоже поддержим.
-            const commonRow = {
-                user_id: String(sessionUserId || this.currentUser.id),
-                username: this.currentUser.username || null,
-                message: message.text,
-                author_type: message.type || 'user',
-                created_at: new Date(message.timestamp).toISOString(),
-                telegram_id: threadTelegramId,
-                sender_telegram_id: senderTelegramId,
-                sender_role: senderRole,
-                sender_username: senderUsername
-            };
-            // Сначала пробуем таблицу messages по вашему SQL
-            let insertRes = await this.sb.from('messages').insert(commonRow);
-            if (insertRes.error) {
-                // Если колонок нет, пробуем без telegram_id
-                const errMsg = String(insertRes.error.message || '');
-                if (errMsg.includes('sender_telegram_id') || errMsg.includes('sender_role') || errMsg.includes('sender_username')) {
-                    const fallbackRow = {
-                        user_id: commonRow.user_id,
-                        username: commonRow.username,
-                        message: commonRow.message,
-                        author_type: commonRow.author_type,
-                        created_at: commonRow.created_at,
-                        telegram_id: commonRow.telegram_id
-                    };
-                    const { error } = await this.sb.from('messages').insert(fallbackRow);
-                    if (error) throw error;
-                } else if (errMsg.includes('telegram_id')) {
-                    const { error } = await this.sb.from('messages').insert({
-                        user_id: commonRow.user_id,
-                        username: commonRow.username,
-                        message: commonRow.message,
-                        author_type: commonRow.author_type,
-                        created_at: commonRow.created_at,
-                    });
-                    if (error) throw error;
-                } else if (errMsg.includes('relation') || errMsg.includes('does not exist')) {
-                    // Если таблицы messages нет, используем support_messages
-                    const { error } = await this.sb.from('support_messages').insert({
-                        user_id: commonRow.user_id,
-                        username: commonRow.username,
-                        author_type: commonRow.author_type,
-                        text: commonRow.message,
-                        timestamp: commonRow.created_at,
-                    });
-                    if (error) throw error;
-                } else {
-                    throw insertRes.error;
-                }
+            const senderUsername = this.isAdmin ? (this.currentUser.username || null) : (message.username || this.currentUser.username || null);
+            const senderFirstName = this.isAdmin ? 
+                (this.currentUser.first_name || 'Администратор') : 
+                (this.currentUser.first_name || 'Пользователь');
+            
+            // Используем новую функцию add_support_message
+            const { data, error } = await this.sb.rpc('add_support_message', {
+                p_thread_id: threadId,
+                p_sender_telegram_id: senderTelegramId,
+                p_sender_username: senderUsername,
+                p_sender_first_name: senderFirstName,
+                p_message_text: message.text,
+                p_message_type: 'text'
+            });
+            
+            if (error) {
+                // Fallback к прямой вставке в таблицу support_messages
+                const fallbackData = {
+                    thread_id: threadId,
+                    sender_telegram_id: senderTelegramId,
+                    sender_role: senderRole,
+                    sender_username: senderUsername,
+                    sender_first_name: senderFirstName,
+                    message_text: message.text,
+                    message_type: 'text'
+                };
+                
+                const { error: fallbackError } = await this.sb
+                    .from('support_messages')
+                    .insert(fallbackData);
+                
+                if (fallbackError) throw fallbackError;
             }
+            
+            console.log('Message saved to cloud:', message.id);
         } catch (e) {
             console.error('saveMessageToCloud error:', e);
         }
@@ -418,123 +408,216 @@ class OSNOVAMiniApp {
     async fetchAllMessagesFromCloud() {
         if (!this.sb) return;
         try {
-            // Пытаемся сначала читать из messages (ваш SQL), затем fallback на support_messages
-            let data = null;
-            let error = null;
-            let fromMessages = true;
-            let res = await this.sb
-                .from('messages')
-                .select('id,user_id,username,message,author_type,created_at,telegram_id,sender_telegram_id,sender_username')
-                .order('created_at', { ascending: true })
-                .limit(1000);
-            if (res.error) {
-                fromMessages = false;
-                const res2 = await this.sb
-                    .from('support_messages')
-                    .select('id,user_id,username,author_type,text,timestamp')
-                    .order('timestamp', { ascending: true })
-                    .limit(1000);
-                data = res2.data;
-                error = res2.error;
+            if (this.isAdmin) {
+                // Для админа загружаем все треды
+                await this.fetchAdminThreads();
             } else {
-                data = res.data;
-                error = res.error;
+                // Для пользователя загружаем только свои сообщения
+                await this.fetchUserMessages();
             }
-            if (error) throw error;
-            // Полная ресинхронизация локальной структуры
-            this.questions = {};
-            data.forEach(row => {
-                const telegramId = fromMessages ? (row.telegram_id ? String(row.telegram_id) : null) : null;
-                const senderTid = fromMessages ? (row.sender_telegram_id ? String(row.sender_telegram_id) : null) : null;
-                const chatKey = telegramId || senderTid || (row.username || row.user_id);
-                const userId = String(chatKey);
-                if (!this.questions[userId]) {
-                    this.questions[userId] = {
-                        user: {
-                            id: userId,
-                            username: (row.sender_username || row.username || 'скрыт'),
-                            first_name: row.username || 'Пользователь'
-                        },
-                        messages: []
-                    };
-                }
-                const msg = fromMessages
-                    ? { id: row.id, text: row.message, type: row.author_type || 'user', timestamp: row.created_at, userId, username: (row.sender_username || row.username || 'скрыт') }
-                    : { id: row.id, text: row.text, type: row.author_type, timestamp: row.timestamp, userId, username: row.username || 'скрыт' };
-                this.questions[userId].messages.push(msg);
-            });
-            // Нормализация ключей: если знаем telegram_id для username — переносим тред к telegram_id
-            const usernameToTid = {};
-            Object.values(this.questions).forEach(thread => {
-                const anyWithTid = thread.messages.find(m => /\d+/.test(m.userId));
-                if (anyWithTid && thread.user.username) {
-                    usernameToTid[thread.user.username] = anyWithTid.userId;
-                }
-            });
-            Object.keys(this.questions).forEach(key => {
-                if (!/^[0-9]+$/.test(key)) {
-                    const tid = usernameToTid[this.questions[key].user.username];
-                    if (tid) {
-                        if (!this.questions[tid]) {
-                            this.questions[tid] = {
-                                user: { ...this.questions[key].user, id: tid },
-                                messages: []
-                            };
-                        }
-                        this.questions[key].messages.forEach(m => {
-                            const moved = { ...m, userId: tid };
-                            this.questions[tid].messages.push(moved);
-                        });
-                        delete this.questions[key];
-                    }
-                }
-            });
-            if (this.currentView === 'admin-panel') this.loadUsersList();
         } catch (e) {
             console.error('fetchAllMessagesFromCloud error:', e);
         }
     }
 
+    async fetchAdminThreads() {
+        try {
+            // Используем функцию get_admin_threads для получения всех тредов
+            const { data: threads, error: threadsError } = await this.sb.rpc('get_admin_threads');
+            
+            if (threadsError) {
+                // Fallback к прямому запросу
+                const { data: messages, error } = await this.sb
+                    .from('support_messages')
+                    .select('*')
+                    .order('created_at', { ascending: true });
+                
+                if (error) throw error;
+                this.processMessages(messages);
+                return;
+            }
+
+            // Очищаем текущие вопросы
+            this.questions = {};
+            
+            // Для каждого треда загружаем сообщения
+            for (const thread of threads || []) {
+                await this.fetchThreadMessages(thread.thread_id, thread);
+            }
+            
+            if (this.currentView === 'admin-panel') this.loadUsersList();
+        } catch (e) {
+            console.error('fetchAdminThreads error:', e);
+        }
+    }
+
+    async fetchThreadMessages(threadId, threadInfo = null) {
+        try {
+            const { data: messages, error } = await this.sb.rpc('get_thread_messages', {
+                p_thread_id: threadId
+            });
+            
+            if (error) {
+                // Fallback к прямому запросу
+                const { data: fallbackMessages, error: fallbackError } = await this.sb
+                    .from('support_messages')
+                    .select('*')
+                    .eq('thread_id', threadId)
+                    .order('created_at', { ascending: true });
+                
+                if (fallbackError) throw fallbackError;
+                this.processThreadMessages(threadId, fallbackMessages, threadInfo);
+                return;
+            }
+            
+            this.processThreadMessages(threadId, messages, threadInfo);
+        } catch (e) {
+            console.error('fetchThreadMessages error:', e);
+        }
+    }
+
+    processThreadMessages(threadId, messages, threadInfo = null) {
+        if (!this.questions[threadId]) {
+            this.questions[threadId] = {
+                user: {
+                    id: threadId,
+                    username: threadInfo?.username || 'скрыт',
+                    first_name: threadInfo?.first_name || 'Пользователь'
+                },
+                messages: []
+            };
+        }
+
+        // Преобразуем сообщения в нужный формат
+        this.questions[threadId].messages = (messages || []).map(msg => ({
+            id: msg.id,
+            text: msg.message_text,
+            type: msg.sender_role,
+            timestamp: msg.created_at,
+            userId: threadId,
+            username: msg.sender_username || 'скрыт'
+        }));
+    }
+
+    async fetchUserMessages() {
+        try {
+            const myTelegramId = String(this.currentUser.id);
+            
+            // Загружаем сообщения для текущего пользователя
+            const { data: messages, error } = await this.sb.rpc('get_thread_messages', {
+                p_thread_id: myTelegramId
+            });
+            
+            if (error) {
+                // Fallback к прямому запросу
+                const { data: fallbackMessages, error: fallbackError } = await this.sb
+                    .from('support_messages')
+                    .select('*')
+                    .eq('thread_id', myTelegramId)
+                    .order('created_at', { ascending: true });
+                
+                if (fallbackError) throw fallbackError;
+                this.processUserMessages(fallbackMessages);
+                return;
+            }
+            
+            this.processUserMessages(messages);
+        } catch (e) {
+            console.error('fetchUserMessages error:', e);
+        }
+    }
+
+    processUserMessages(messages) {
+        const myTelegramId = String(this.currentUser.id);
+        
+        this.questions[myTelegramId] = {
+            user: {
+                id: myTelegramId,
+                username: this.currentUser.username || 'скрыт',
+                first_name: this.currentUser.first_name || 'Пользователь'
+            },
+            messages: (messages || []).map(msg => ({
+                id: msg.id,
+                text: msg.message_text,
+                type: msg.sender_role,
+                timestamp: msg.created_at,
+                userId: myTelegramId,
+                username: msg.sender_username || this.currentUser.username || 'скрыт'
+            }))
+        };
+    }
+
     subscribeRealtime() {
         if (!this.sb) return;
         try {
-            // Подписки и на messages, и на support_messages
-            this.sb.channel('messages_ins')
-                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
-                    const row = payload.new;
-                    const chatKey = row.telegram_id ? String(row.telegram_id) : (row.sender_telegram_id ? String(row.sender_telegram_id) : (row.username || row.user_id));
-                    const userId = String(chatKey);
-                    if (!this.questions[userId]) {
-                        this.questions[userId] = {
-                            user: { id: userId, username: (row.sender_username || row.username || 'скрыт'), first_name: (row.sender_username || row.username || 'Пользователь') },
-                            messages: []
-                        };
-                    }
-                    const msg = { id: row.id, text: row.message, type: row.author_type || 'user', timestamp: row.created_at, userId, username: (row.sender_username || row.username || 'скрыт') };
-                    this.questions[userId].messages.push(msg);
-                    if (this.currentView === 'user-chat' && this.selectedUserId === userId) this.addMessage(msg);
-                    if (!this.isAdmin && userId === String(this.currentUser.id) && this.currentView === 'chat') this.addMessage(msg);
-                    if (this.currentView === 'admin-panel') this.loadUsersList();
+            // Подписка на новые сообщения в support_messages
+            this.sb.channel('support_messages_realtime')
+                .on('postgres_changes', { 
+                    event: 'INSERT', 
+                    schema: 'public', 
+                    table: 'support_messages' 
+                }, (payload) => {
+                    this.handleRealtimeMessage(payload.new);
                 })
                 .subscribe();
-            this.sb.channel('support_messages_ins')
-                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'support_messages' }, (payload) => {
-                    const row = payload.new;
-                    const userId = String(row.user_id);
-                    if (!this.questions[userId]) {
-                        this.questions[userId] = {
-                            user: { id: userId, username: row.username || 'скрыт', first_name: row.username || 'Пользователь' },
-                            messages: []
-                        };
-                    }
-                    const msg = { id: row.id, text: row.text, type: row.author_type, timestamp: row.timestamp, userId, username: row.username || 'скрыт' };
-                    this.questions[userId].messages.push(msg);
-                    if (this.currentView === 'user-chat' && this.selectedUserId === userId) this.addMessage(msg);
-                    if (this.currentView === 'admin-panel') this.loadUsersList();
-                })
-                .subscribe();
+                
+            console.log('Subscribed to realtime updates');
         } catch (e) {
             console.error('subscribeRealtime error:', e);
+        }
+    }
+
+    handleRealtimeMessage(messageData) {
+        try {
+            const threadId = messageData.thread_id;
+            const msg = {
+                id: messageData.id,
+                text: messageData.message_text,
+                type: messageData.sender_role,
+                timestamp: messageData.created_at,
+                userId: threadId,
+                username: messageData.sender_username || 'скрыт'
+            };
+
+            // Проверяем, не от нас ли это сообщение (избегаем дублирования)
+            const isMyMessage = Number(messageData.sender_telegram_id) === Number(this.currentUser.id);
+            if (isMyMessage) return;
+
+            // Инициализируем тред если его нет
+            if (!this.questions[threadId]) {
+                this.questions[threadId] = {
+                    user: {
+                        id: threadId,
+                        username: messageData.sender_username || 'скрыт',
+                        first_name: messageData.sender_first_name || 'Пользователь'
+                    },
+                    messages: []
+                };
+            }
+
+            // Добавляем сообщение в локальную структуру
+            this.questions[threadId].messages.push(msg);
+
+            // Отображаем сообщение в UI если нужно
+            if (this.isAdmin) {
+                // Для админа: показываем если открыт чат с этим пользователем
+                if (this.currentView === 'user-chat' && this.selectedUserId === threadId) {
+                    this.addMessage(msg);
+                }
+                // Обновляем список пользователей в админ-панели
+                if (this.currentView === 'admin-panel') {
+                    this.loadUsersList();
+                }
+            } else {
+                // Для пользователя: показываем если это сообщение в его треде
+                if (threadId === String(this.currentUser.id) && this.currentView === 'chat') {
+                    this.addMessage(msg);
+                }
+            }
+
+            console.log('Realtime message processed:', msg);
+        } catch (e) {
+            console.error('handleRealtimeMessage error:', e);
         }
     }
 
@@ -553,82 +636,7 @@ class OSNOVAMiniApp {
         }
     }
 
-    async fetchMessagesForMe() {
-        if (!this.sb) return;
-        const myTelegramId = String(this.currentUser.id);
-        try {
-            // 1) Предпочтительно: по telegram_id или sender_telegram_id (обе стороны переписки)
-            let { data, error } = await this.sb
-                .from('messages')
-                .select('id,username,message,author_type,created_at,telegram_id,sender_telegram_id,sender_username')
-                .or(`telegram_id.eq.${myTelegramId},sender_telegram_id.eq.${myTelegramId}`)
-                .order('created_at', { ascending: true })
-                .limit(500);
-            if (error) throw error;
 
-            // 2) Если пусто — fallback по username (устаревшая схема)
-            if (!data || data.length === 0) {
-                const uname = this.currentUser.username || '';
-                if (uname) {
-                    const res2 = await this.sb
-                        .from('messages')
-                        .select('id,username,message,author_type,created_at')
-                        .eq('username', uname)
-                        .order('created_at', { ascending: true })
-                        .limit(500);
-                    if (!res2.error && res2.data) data = res2.data;
-                }
-            }
-
-            // 3) Если всё ещё пусто — fallback на support_messages
-            if (!data || data.length === 0) {
-                const res3 = await this.sb
-                    .from('support_messages')
-                    .select('id,user_id,username,author_type,text,timestamp')
-                    .eq('user_id', myTelegramId)
-                    .order('timestamp', { ascending: true })
-                    .limit(500);
-                if (!res3.error && res3.data) {
-                    const rows = res3.data;
-                    this.questions[myTelegramId] = {
-                        user: {
-                            id: myTelegramId,
-                            username: this.currentUser.username || 'скрыт',
-                            first_name: this.currentUser.first_name || 'Пользователь'
-                        },
-                        messages: rows.map(r => ({
-                            id: r.id,
-                            text: r.text,
-                            type: (r.author_type || 'user'),
-                            timestamp: r.timestamp,
-                            userId: myTelegramId,
-                            username: r.username || this.currentUser.username || 'скрыт'
-                        }))
-                    };
-                    return;
-                }
-            }
-
-            const rows = data || [];
-            this.questions[myTelegramId] = {
-                user: {
-                    id: myTelegramId,
-                    username: this.currentUser.username || 'скрыт',
-                    first_name: this.currentUser.first_name || 'Пользователь'
-                },
-                messages: rows.map(r => ({
-                    id: r.id,
-                    text: r.message,
-                    type: (r.author_type || 'user'),
-                    timestamp: r.created_at,
-                    userId: myTelegramId,
-                    username: (r.sender_username || r.username || this.currentUser.username || 'скрыт')
-                }))
-            };
-        } catch (e) {
-            console.error('fetchMessagesForMe error:', e);
-        }
-    }
     
     sendToTelegramAPI(data) {
         // Отправляем уведомление администраторам через бота
@@ -913,10 +921,18 @@ ${message}
             // Для сообщений администратора показываем "Администратор ✔"
             senderName = '<div class="message-sender">Администратор <span class="verified-badge-small">✔</span></div>';
         } else {
-            const fallbackFirstName = (this.selectedUserData?.user.first_name) || this.currentUser.first_name || 'Пользователь';
-            const uname = message.username || (this.selectedUserData?.user.username) || this.currentUser.username || '';
-            const label = uname ? `@${uname}` : fallbackFirstName;
-            senderName = `<div class="message-sender">${this.escapeHtml(label)}</div>`;
+            // Для сообщений пользователя показываем его Telegram ник или имя
+            if (this.isAdmin && this.selectedUserData) {
+                // В админ-панели показываем данные выбранного пользователя
+                const uname = this.selectedUserData.user.username;
+                const label = uname ? `@${uname}` : (this.selectedUserData.user.first_name || 'Пользователь');
+                senderName = `<div class="message-sender">${this.escapeHtml(label)}</div>`;
+            } else {
+                // Для обычного пользователя показываем его данные
+                const uname = message.username || this.currentUser.username || '';
+                const label = uname ? `@${uname}` : (this.currentUser.first_name || 'Пользователь');
+                senderName = `<div class="message-sender">${this.escapeHtml(label)}</div>`;
+            }
         }
         
         messageElement.innerHTML = `
