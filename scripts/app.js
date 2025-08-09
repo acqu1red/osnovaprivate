@@ -66,6 +66,12 @@ class OSNOVAMiniApp {
         if (!this.isAdmin && this.sb) {
             await this.fetchUserMessages();
             this.loadUserMessages();
+            
+            // Добавляем периодическую перезагрузку сообщений для отладки
+            setInterval(async () => {
+                console.log('Reloading user messages...');
+                await this.fetchUserMessages();
+            }, 10000); // каждые 10 секунд
         }
 
         // Если подключен Supabase — подписываемся и грузим сообщения
@@ -355,22 +361,37 @@ class OSNOVAMiniApp {
         console.log('sendToBot ->', botData);
     }
 
-    // ====== Облачное хранилище (новая структура) ======
+    // ====== ПЕРЕПИСАННАЯ система облачного хранилища ======
     async saveMessageToCloud(message) {
         if (!this.sb) return;
         try {
             await this.ensureSupabaseSession();
             
-            // Определяем данные для сохранения
-            const threadId = this.isAdmin ? String(message.userId) : String(this.currentUser.id);
+            // КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Для всех сообщений thread_id = ID пользователя (не админа!)
+            let threadId;
+            if (this.isAdmin && this.selectedUserId) {
+                // Админ пишет в тред пользователя
+                threadId = String(this.selectedUserId);
+            } else {
+                // Пользователь пишет в свой тред
+                threadId = String(this.currentUser.id);
+            }
+            
             const senderTelegramId = Number(this.currentUser.id);
-            const senderRole = message.type || (this.isAdmin ? 'admin' : 'user');
+            const senderRole = this.isAdmin ? 'admin' : 'user';
             const senderUsername = this.currentUser.username || null;
             const senderFirstName = this.isAdmin ? 
                 (this.currentUser.first_name || 'Администратор') : 
                 (this.currentUser.first_name || 'Пользователь');
             
-            // Используем новую функцию add_support_message с правильным порядком параметров
+            console.log('Saving message to cloud:', {
+                threadId,
+                senderTelegramId,
+                senderRole,
+                messageText: message.text
+            });
+            
+            // Используем функцию add_support_message
             const { data, error } = await this.sb.rpc('add_support_message', {
                 p_thread_id: threadId,
                 p_sender_telegram_id: senderTelegramId,
@@ -381,7 +402,8 @@ class OSNOVAMiniApp {
             });
             
             if (error) {
-                // Fallback к прямой вставке в таблицу support_messages
+                console.error('RPC error, using fallback:', error);
+                // Fallback к прямой вставке
                 const fallbackData = {
                     thread_id: threadId,
                     sender_telegram_id: senderTelegramId,
@@ -396,10 +418,13 @@ class OSNOVAMiniApp {
                     .from('support_messages')
                     .insert(fallbackData);
                 
-                if (fallbackError) throw fallbackError;
+                if (fallbackError) {
+                    console.error('Fallback insert error:', fallbackError);
+                    throw fallbackError;
+                }
             }
             
-            console.log('Message saved to cloud:', message.id);
+            console.log('Message saved successfully:', message.id);
         } catch (e) {
             console.error('saveMessageToCloud error:', e);
         }
@@ -533,27 +558,40 @@ class OSNOVAMiniApp {
     processUserMessages(messages) {
         const myTelegramId = String(this.currentUser.id);
         
+        console.log('Processing user messages:', messages?.length || 0, 'messages for user', myTelegramId);
+        
         this.questions[myTelegramId] = {
             user: {
                 id: myTelegramId,
                 username: this.currentUser.username || 'скрыт',
                 first_name: this.currentUser.first_name || 'Пользователь'
             },
-            messages: (messages || []).map(msg => ({
-                id: msg.id,
-                text: msg.message_text,
-                type: msg.sender_role,
-                timestamp: msg.created_at,
-                userId: myTelegramId,
-                username: msg.sender_username || this.currentUser.username || 'скрыт'
-            }))
+            messages: (messages || []).map(msg => {
+                console.log('Processing message:', {
+                    id: msg.id,
+                    text: msg.message_text,
+                    sender_role: msg.sender_role,
+                    sender_telegram_id: msg.sender_telegram_id
+                });
+                
+                return {
+                    id: msg.id,
+                    text: msg.message_text,
+                    type: msg.sender_role,
+                    timestamp: msg.created_at,
+                    userId: myTelegramId,
+                    username: msg.sender_username || this.currentUser.username || 'скрыт'
+                };
+            })
         };
         
         // Загружаем сообщения в интерфейс для пользователя
         if (!this.isAdmin && this.currentView === 'chat') {
+            console.log('Loading messages to user interface');
             const messagesContainer = document.getElementById('messages');
             messagesContainer.innerHTML = '';
             this.questions[myTelegramId].messages.forEach(message => {
+                console.log('Adding message to UI:', message.text, 'type:', message.type);
                 this.addMessage(message);
             });
         }
@@ -582,6 +620,15 @@ class OSNOVAMiniApp {
     handleRealtimeMessage(messageData) {
         try {
             const threadId = messageData.thread_id;
+            const senderTelegramId = Number(messageData.sender_telegram_id);
+            const myTelegramId = Number(this.currentUser.id);
+            
+            // Проверяем, не от нас ли это сообщение (избегаем дублирования)
+            if (senderTelegramId === myTelegramId) {
+                console.log('Ignoring my own message');
+                return;
+            }
+
             const msg = {
                 id: messageData.id,
                 text: messageData.message_text,
@@ -591,53 +638,82 @@ class OSNOVAMiniApp {
                 username: messageData.sender_username || 'скрыт'
             };
 
-            // Проверяем, не от нас ли это сообщение (избегаем дублирования)
-            const isMyMessage = Number(messageData.sender_telegram_id) === Number(this.currentUser.id);
-            if (isMyMessage) return;
-
             console.log('Processing realtime message:', {
                 threadId,
+                senderTelegramId,
                 senderRole: messageData.sender_role,
                 isAdmin: this.isAdmin,
-                currentUserId: this.currentUser.id,
-                currentView: this.currentView
+                myTelegramId,
+                currentView: this.currentView,
+                messageText: messageData.message_text
             });
 
-            // Инициализируем тред если его нет
-            if (!this.questions[threadId]) {
-                this.questions[threadId] = {
-                    user: {
-                        id: threadId,
-                        username: messageData.sender_username || 'скрыт',
-                        first_name: messageData.sender_first_name || 'Пользователь'
-                    },
-                    messages: []
-                };
-            }
-
-            // Добавляем сообщение в локальную структуру
-            this.questions[threadId].messages.push(msg);
-
-            // Отображаем сообщение в UI
+            // НОВАЯ ЛОГИКА: Все сообщения группируются по thread_id (который = user_id)
+            
             if (this.isAdmin) {
-                // Для админа: показываем если открыт чат с этим пользователем
+                // === ЛОГИКА ДЛЯ АДМИНА ===
+                
+                // Инициализируем тред если его нет
+                if (!this.questions[threadId]) {
+                    this.questions[threadId] = {
+                        user: {
+                            id: threadId,
+                            username: messageData.sender_username || 'скрыт',
+                            first_name: messageData.sender_first_name || 'Пользователь'
+                        },
+                        messages: []
+                    };
+                }
+
+                // Добавляем сообщение в локальную структуру
+                this.questions[threadId].messages.push(msg);
+
+                // Отображаем сообщение если открыт чат с этим пользователем
                 if (this.currentView === 'user-chat' && this.selectedUserId === threadId) {
+                    console.log('Adding message to admin chat view');
                     this.addMessage(msg);
                 }
+                
                 // Обновляем список пользователей в админ-панели
                 if (this.currentView === 'admin-panel') {
                     this.loadUsersList();
                 }
+                
             } else {
-                // Для обычного пользователя: показываем сообщения от админа в его треде
-                const myThreadId = String(this.currentUser.id);
-                if (threadId === myThreadId && this.currentView === 'chat') {
-                    console.log('Adding admin message to user chat');
-                    this.addMessage(msg);
+                // === ЛОГИКА ДЛЯ ПОЛЬЗОВАТЕЛЯ ===
+                
+                const myThreadId = String(myTelegramId);
+                
+                // Показываем сообщения только в своем треде
+                if (threadId === myThreadId) {
+                    console.log('Adding message to user chat - this is for me!');
+                    
+                    // Инициализируем тред если его нет
+                    if (!this.questions[myThreadId]) {
+                        this.questions[myThreadId] = {
+                            user: {
+                                id: myThreadId,
+                                username: this.currentUser.username || 'скрыт',
+                                first_name: this.currentUser.first_name || 'Пользователь'
+                            },
+                            messages: []
+                        };
+                    }
+
+                    // Добавляем сообщение в локальную структуру
+                    this.questions[myThreadId].messages.push(msg);
+
+                    // Отображаем сообщение если пользователь в чате
+                    if (this.currentView === 'chat') {
+                        console.log('Displaying admin message to user');
+                        this.addMessage(msg);
+                    }
+                } else {
+                    console.log('Message not for me, ignoring. My thread:', myThreadId, 'Message thread:', threadId);
                 }
             }
 
-            console.log('Realtime message processed:', msg);
+            console.log('Realtime message processed successfully');
         } catch (e) {
             console.error('handleRealtimeMessage error:', e);
         }
