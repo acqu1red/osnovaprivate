@@ -281,6 +281,13 @@ html {
     color: var(--text-secondary);
 }
 
+.message-author {
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: var(--text-secondary);
+}
+
 /* Input Area */
 .input-area {
     padding: 20px;

@@ -656,9 +656,7 @@ ${data.question}
         const messagesContainer = document.getElementById('messages');
         messagesContainer.innerHTML = '';
         
-        this.selectedUserData.messages.forEach(message => {
-            this.addMessage(message);
-        });
+        this.selectedUserData.messages.forEach(message => this.addMessage(message));
         
         // Обновляем обработчики событий для админского режима
         this.updateChatHandlers();
@@ -872,6 +870,13 @@ ${message}
     }
     
     // Утилиты
+    getSenderLabel(message) {
+        // Для пользователя: его сообщения — label = @username или first_name; админ — "Администратор"
+        // Для админа: сообщения с type 'admin' — "Администратор", иначе — @username пользователя
+        if (message.type === 'admin') return 'Администратор';
+        const uname = message.username || this.currentUser.username || '';
+        return uname ? `@${uname}` : (this.currentUser.first_name || 'Пользователь');
+    }
     escapeHtml(text) {
         const div = document.createElement('div');
         div.textContent = text;
