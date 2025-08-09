@@ -244,18 +244,18 @@ html {
 }
 
 .message.self {
-    background: rgba(237, 233, 213, 0.08);
+    background: rgba(237, 233, 213, 0.12); /* бежевый оттенок для отправителя */
     color: var(--text-primary);
-    margin-left: auto;
-    border-bottom-right-radius: 8px;
+    margin-right: auto; /* слева */
+    border-bottom-left-radius: 8px;
     border-color: var(--accent-light);
 }
 
 .message.other {
     background: var(--bg-primary);
     color: var(--text-primary);
-    margin-right: auto;
-    border-bottom-left-radius: 8px;
+    margin-left: auto; /* справа */
+    border-bottom-right-radius: 8px;
     border-color: var(--border-dark);
 }
 
