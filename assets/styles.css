@@ -217,12 +217,12 @@ html {
 }
 
 .message {
-    margin-bottom: 15px;
-    padding: 16px 20px;
+    margin-bottom: 12px;
+    padding: 14px 16px;
     border-radius: var(--border-radius-lg);
-    max-width: 80%;
+    max-width: 78%;
     word-wrap: break-word;
-    animation: messageSlide 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    animation: messageSlide 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     transition: var(--transition-smooth);
     border: 1px solid var(--border-dark);
 }
@@ -243,15 +243,15 @@ html {
     box-shadow: var(--shadow-soft);
 }
 
-.message.user {
-    background: var(--bg-primary);
+.message.self {
+    background: rgba(237, 233, 213, 0.08);
     color: var(--text-primary);
     margin-left: auto;
     border-bottom-right-radius: 8px;
     border-color: var(--accent-light);
 }
 
-.message.admin {
+.message.other {
     background: var(--bg-primary);
     color: var(--text-primary);
     margin-right: auto;

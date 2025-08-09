@@ -448,6 +448,8 @@ class CatalystBot:
                     await self.send_question_to_channel(context, data['data'])
                     # Отправляем уведомления администраторам
                     await self.send_admin_notifications(context, data['data'])
+                    # Дополнительно — личные уведомления для админов
+                    await self.notify_admins_direct(context, data['data'])
                     
                 elif data.get('type') == 'admin_reply':
                     # Отправляем ответ пользователю
@@ -551,6 +553,41 @@ class CatalystBot:
                     logger.error(f"Error notifying admin {admin_id}: {send_err}")
         except Exception as e:
             logger.error(f"Error in send_admin_notifications: {e}")
+    
+    async def notify_admins_direct(self, context: ContextTypes.DEFAULT_TYPE, data):
+        """Личные уведомления администраторам о новом сообщении пользователя + кнопка Ответить"""
+        try:
+            user_info = data['user']
+            username = user_info.get('username', 'скрыт')
+            first_name = user_info.get('first_name', 'Пользователь')
+            telegram_id = user_info.get('id')
+
+            text = (
+                "🔔 Новый вопрос\n\n"
+                f"👤 Имя: {first_name}\n"
+                f"📝 Username: @{username}\n"
+                f"🆔 Telegram ID: {telegram_id}\n\n"
+                f"💬 Сообщение: {data.get('question', '—')}\n\n"
+                "Нажмите 'Ответить', чтобы открыть диалог"
+            )
+
+            from urllib.parse import quote
+            params = (
+                f"userId={quote(str(telegram_id))}&"
+                f"first_name={quote(first_name)}&"
+                f"username={quote(username)}&"
+                f"question={quote(data.get('question', ''))}&admin=1"
+            )
+            url = f"{MINI_APP_URL}?{params}"
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton("💬 Ответить", web_app=WebAppInfo(url=url))]])
+
+            for admin_id in self.admin_ids:
+                try:
+                    await context.bot.send_message(chat_id=admin_id, text=text, reply_markup=kb)
+                except Exception as e:
+                    logger.error(f"notify_admins_direct error for {admin_id}: {e}")
+        except Exception as e:
+            logger.error(f"notify_admins_direct outer error: {e}")
 
     async def admin_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Кнопка для открытия админ-панели Mini App"""

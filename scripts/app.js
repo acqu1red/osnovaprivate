@@ -279,8 +279,9 @@ class OSNOVAMiniApp {
     addMessage(message) {
         const messagesContainer = document.getElementById('messages');
         const messageElement = document.createElement('div');
-        
-        messageElement.className = `message ${message.type}`;
+        const isSelf = this.isAdmin ? (message.type === 'admin') : (message.type === 'user');
+        const sideClass = isSelf ? 'self' : 'other';
+        messageElement.className = `message ${sideClass}`;
         
         let senderName = '';
         if (message.type === 'admin') {
@@ -797,8 +798,9 @@ ${message}
     addMessageWithAttachment(message) {
         const messagesContainer = document.getElementById('messages');
         const messageElement = document.createElement('div');
-        
-        messageElement.className = `message ${message.type}`;
+        const isSelf = this.isAdmin ? (message.type === 'admin') : (message.type === 'user');
+        const sideClass = isSelf ? 'self' : 'other';
+        messageElement.className = `message ${sideClass}`;
         
         let senderName = '';
         if (message.type === 'admin') {
