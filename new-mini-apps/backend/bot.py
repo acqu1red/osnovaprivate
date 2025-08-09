@@ -50,8 +50,10 @@ async def button(update: Update, context: CallbackContext) -> None:
         await query.edit_message_text(text=message, reply_markup=reply_markup)
 
     elif query.data == 'ask_question':
-        # Открытие miniapps по ссылке
-        await query.edit_message_text(text="[Открыть miniapps](https://acqu1red.github.io/osnovaprivate/)", parse_mode='Markdown')
+        # Открытие miniapps через Telegram
+        await query.edit_message_text(text="Открытие miniapps...", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Открыть miniapps", url="https://t.me/OSNOVAprivate_bot/myapp")]
+        ]))
 
     elif query.data == 'back':
         await start(update, context)
