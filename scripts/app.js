@@ -424,7 +424,7 @@ class OSNOVAMiniApp {
             let fromMessages = true;
             let res = await this.sb
                 .from('messages')
-                .select('id,user_id,username,message,author_type,created_at,telegram_id')
+                .select('id,user_id,username,message,author_type,created_at,telegram_id,sender_telegram_id,sender_username')
                 .order('created_at', { ascending: true })
                 .limit(1000);
             if (res.error) {
@@ -445,20 +445,21 @@ class OSNOVAMiniApp {
             this.questions = {};
             data.forEach(row => {
                 const telegramId = fromMessages ? (row.telegram_id ? String(row.telegram_id) : null) : null;
-                const chatKey = telegramId || (row.username || row.user_id);
+                const senderTid = fromMessages ? (row.sender_telegram_id ? String(row.sender_telegram_id) : null) : null;
+                const chatKey = telegramId || senderTid || (row.username || row.user_id);
                 const userId = String(chatKey);
                 if (!this.questions[userId]) {
                     this.questions[userId] = {
                         user: {
                             id: userId,
-                            username: row.username || 'скрыт',
+                            username: (row.sender_username || row.username || 'скрыт'),
                             first_name: row.username || 'Пользователь'
                         },
                         messages: []
                     };
                 }
                 const msg = fromMessages
-                    ? { id: row.id, text: row.message, type: row.author_type || 'user', timestamp: row.created_at, userId, username: row.username || 'скрыт' }
+                    ? { id: row.id, text: row.message, type: row.author_type || 'user', timestamp: row.created_at, userId, username: (row.sender_username || row.username || 'скрыт') }
                     : { id: row.id, text: row.text, type: row.author_type, timestamp: row.timestamp, userId, username: row.username || 'скрыт' };
                 this.questions[userId].messages.push(msg);
             });
@@ -501,17 +502,18 @@ class OSNOVAMiniApp {
             this.sb.channel('messages_ins')
                 .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
                     const row = payload.new;
-                    const chatKey = row.telegram_id ? String(row.telegram_id) : (row.username || row.user_id);
+                    const chatKey = row.telegram_id ? String(row.telegram_id) : (row.sender_telegram_id ? String(row.sender_telegram_id) : (row.username || row.user_id));
                     const userId = String(chatKey);
                     if (!this.questions[userId]) {
                         this.questions[userId] = {
-                            user: { id: userId, username: row.username || 'скрыт', first_name: row.username || 'Пользователь' },
+                            user: { id: userId, username: (row.sender_username || row.username || 'скрыт'), first_name: (row.sender_username || row.username || 'Пользователь') },
                             messages: []
                         };
                     }
-                    const msg = { id: row.id, text: row.message, type: row.author_type || 'user', timestamp: row.created_at, userId, username: row.username || 'скрыт' };
+                    const msg = { id: row.id, text: row.message, type: row.author_type || 'user', timestamp: row.created_at, userId, username: (row.sender_username || row.username || 'скрыт') };
                     this.questions[userId].messages.push(msg);
                     if (this.currentView === 'user-chat' && this.selectedUserId === userId) this.addMessage(msg);
+                    if (!this.isAdmin && userId === String(this.currentUser.id) && this.currentView === 'chat') this.addMessage(msg);
                     if (this.currentView === 'admin-panel') this.loadUsersList();
                 })
                 .subscribe();
@@ -555,27 +557,72 @@ class OSNOVAMiniApp {
         if (!this.sb) return;
         const myTelegramId = String(this.currentUser.id);
         try {
-            // Читаем диалог по telegram_id — включает и мои сообщения, и ответы админов
-            const { data, error } = await this.sb
+            // 1) Предпочтительно: по telegram_id или sender_telegram_id (обе стороны переписки)
+            let { data, error } = await this.sb
                 .from('messages')
-                .select('id,username,message,author_type,created_at,telegram_id')
-                .eq('telegram_id', myTelegramId)
+                .select('id,username,message,author_type,created_at,telegram_id,sender_telegram_id,sender_username')
+                .or(`telegram_id.eq.${myTelegramId},sender_telegram_id.eq.${myTelegramId}`)
                 .order('created_at', { ascending: true })
                 .limit(500);
             if (error) throw error;
+
+            // 2) Если пусто — fallback по username (устаревшая схема)
+            if (!data || data.length === 0) {
+                const uname = this.currentUser.username || '';
+                if (uname) {
+                    const res2 = await this.sb
+                        .from('messages')
+                        .select('id,username,message,author_type,created_at')
+                        .eq('username', uname)
+                        .order('created_at', { ascending: true })
+                        .limit(500);
+                    if (!res2.error && res2.data) data = res2.data;
+                }
+            }
+
+            // 3) Если всё ещё пусто — fallback на support_messages
+            if (!data || data.length === 0) {
+                const res3 = await this.sb
+                    .from('support_messages')
+                    .select('id,user_id,username,author_type,text,timestamp')
+                    .eq('user_id', myTelegramId)
+                    .order('timestamp', { ascending: true })
+                    .limit(500);
+                if (!res3.error && res3.data) {
+                    const rows = res3.data;
+                    this.questions[myTelegramId] = {
+                        user: {
+                            id: myTelegramId,
+                            username: this.currentUser.username || 'скрыт',
+                            first_name: this.currentUser.first_name || 'Пользователь'
+                        },
+                        messages: rows.map(r => ({
+                            id: r.id,
+                            text: r.text,
+                            type: (r.author_type || 'user'),
+                            timestamp: r.timestamp,
+                            userId: myTelegramId,
+                            username: r.username || this.currentUser.username || 'скрыт'
+                        }))
+                    };
+                    return;
+                }
+            }
+
+            const rows = data || [];
             this.questions[myTelegramId] = {
                 user: {
                     id: myTelegramId,
                     username: this.currentUser.username || 'скрыт',
                     first_name: this.currentUser.first_name || 'Пользователь'
                 },
-                messages: data.map(r => ({
+                messages: rows.map(r => ({
                     id: r.id,
                     text: r.message,
                     type: (r.author_type || 'user'),
                     timestamp: r.created_at,
                     userId: myTelegramId,
-                    username: r.username || this.currentUser.username || 'скрыт'
+                    username: (r.sender_username || r.username || this.currentUser.username || 'скрыт')
                 }))
             };
         } catch (e) {
